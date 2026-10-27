@@ -43,8 +43,11 @@ enum Command {
     ///
     /// Gestures: double-tap, triple-tap, hold. Actions: none, play-pause, next, previous,
     /// voice-assistant, volume-up, volume-down, noise-cycle, game-mode (not every gesture takes
-    /// every action).
+    /// every action). `budctl touch cycle …` sets what a hold steps through.
+    #[command(args_conflicts_with_subcommands = true)]
     Touch {
+        #[command(subcommand)]
+        cycle: Option<TouchCommand>,
         /// The bud to change: left, right, or both.
         #[arg(value_enum, requires = "gesture")]
         side: Option<Side>,
@@ -90,6 +93,35 @@ enum Command {
 enum FindAction {
     Start,
     Stop,
+}
+
+#[derive(Subcommand)]
+enum TouchCommand {
+    /// Set the noise-control modes a hold steps through (both buds), then read it back.
+    ///
+    /// At least two modes. The buds step through them in their own order.
+    Cycle {
+        #[arg(value_enum, required = true, num_args = 2..=3, value_name = "MODE")]
+        modes: Vec<CycleMode>,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CycleMode {
+    Off,
+    Transparency,
+    /// Noise cancelling.
+    Anc,
+}
+
+impl CycleMode {
+    fn name(self) -> &'static str {
+        match self {
+            CycleMode::Off => "off",
+            CycleMode::Transparency => "transparency",
+            CycleMode::Anc => "anc",
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -197,10 +229,19 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             output::status(out, &device, model, &status, cli.json)
         }
         Command::Touch {
+            cycle: Some(TouchCommand::Cycle { ref modes }),
+            ..
+        } => {
+            let names: Vec<&str> = modes.iter().map(|m| m.name()).collect();
+            let now = session.set_hold_cycle(&names)?;
+            output::hold_cycle(out, &device, model, &now, cli.json)
+        }
+        Command::Touch {
             side: Some(side),
             gesture: Some(ref gesture),
             action: Some(ref action),
             dry_run,
+            ..
         } => {
             let change = session.set_touch(side.name(), gesture, action, dry_run)?;
             output::touch_change(out, &device, model, &change, cli.json)

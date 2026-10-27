@@ -186,6 +186,23 @@ pub fn touch(
     Ok(())
 }
 
+/// The hold cycle after a change, as the buds report it on reading back. JSON uses the same
+/// `hold_cycle` list as `touch`.
+pub fn hold_cycle(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    now: &[String],
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(out, Some((device, model)), serde_json::json!({ "hold_cycle": now }));
+    }
+    header(out, device, model)?;
+    writeln!(out, "  Hold cycles through: {}", now.join(" → "))?;
+    Ok(())
+}
+
 /// A touch-control change: what changed (or would change, on a dry run) and the write.
 pub fn touch_change(
     out: &mut impl Write,

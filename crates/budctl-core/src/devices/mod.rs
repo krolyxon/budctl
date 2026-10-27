@@ -66,6 +66,14 @@ pub trait Session: Send {
         Err(Error::Unsupported(format!("budctl cannot change {key} on these buds")))
     }
 
+    /// Set the noise-control modes a hold steps through (`off`, `transparency`, `anc`), then
+    /// read it back. Returns the modes the buds now report.
+    fn set_hold_cycle(&mut self, _modes: &[&str]) -> Result<Vec<String>> {
+        Err(Error::Unsupported(
+            "budctl cannot change the hold cycle on these buds".to_owned(),
+        ))
+    }
+
     /// Give a touch gesture a new action, on `side` (`left`, `right` or `both`), then read the
     /// table back. With `dry_run`, read the table and work out the write, but send nothing.
     fn set_touch(&mut self, _side: &str, _gesture: &str, _action: &str, _dry_run: bool) -> Result<TouchChange> {

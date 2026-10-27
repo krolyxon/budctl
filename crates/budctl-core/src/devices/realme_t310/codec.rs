@@ -324,10 +324,16 @@ pub(super) fn noise_write_mask(mode: NoiseMode) -> u32 {
 /// Spec: realme_t310.md#anc-write
 pub(super) fn noise_write_payload(mode: NoiseMode) -> Vec<u8> {
     let mut payload = NOISE_MODE_QUERY.to_vec();
-    let mask = noise_write_mask(mode).to_le_bytes();
-    let used = mask.iter().rposition(|&b| b != 0).map_or(1, |last| last + 1);
-    payload.extend(mask.iter().take(used));
+    payload.extend(fewest_bytes(noise_write_mask(mode)));
     payload
+}
+
+/// A mask in the fewest little-endian bytes that hold it, at least one.
+/// Spec: realme_t310.md#anc-write, #hold-cycle-write
+fn fewest_bytes(mask: u32) -> Vec<u8> {
+    let bytes = mask.to_le_bytes();
+    let used = bytes.iter().rposition(|&b| b != 0).map_or(1, |last| last + 1);
+    bytes.iter().take(used).copied().collect()
 }
 
 /// The mask in a noise-control read reply. Spec: realme_t310.md#anc-read
@@ -342,7 +348,7 @@ pub(super) fn check_write_reply(reply: &[u8], what: &'static str) -> Result<()> 
 
 /// Spec: realme_t310.md#hold-cycle
 pub(super) fn decode_hold_cycle(reply: &[u8]) -> Result<Vec<String>> {
-    let mask = noise_mask(reply, HOLD_CYCLE_QUERY, "the hold-cycle reply")?;
+    let mask = decode_hold_cycle_mask(reply)?;
     let mut modes: Vec<String> = CYCLE_MODES
         .iter()
         .filter(|(bit, _)| mask & bit != 0)
@@ -353,6 +359,42 @@ pub(super) fn decode_hold_cycle(reply: &[u8]) -> Result<Vec<String>> {
         modes.push(format!("unknown (0x{:02X})", mask & !known));
     }
     Ok(modes)
+}
+
+/// The mask for a hold cycle through `modes` (`off`, `transparency`, `anc`): at least two,
+/// none twice. The buds keep their own order, so the order given does not matter.
+/// Spec: realme_t310.md#hold-cycle-write
+pub(super) fn hold_cycle_mask(modes: &[&str]) -> Result<u32> {
+    let mut mask = 0;
+    for &mode in modes {
+        let Some(&(bit, _)) = CYCLE_MODES.iter().find(|(_, name)| *name == mode) else {
+            let names: Vec<&str> = CYCLE_MODES.iter().map(|(_, name)| *name).collect();
+            return Err(Error::Usage(format!(
+                "no mode called {mode} in the hold cycle; use: {}",
+                names.join(", ")
+            )));
+        };
+        if mask & bit != 0 {
+            return Err(Error::Usage(format!("{mode} is in the hold cycle twice")));
+        }
+        mask |= bit;
+    }
+    if mask.count_ones() < 2 {
+        return Err(Error::Usage("the hold cycle needs at least two modes".to_owned()));
+    }
+    Ok(mask)
+}
+
+/// `02 01 <mask>`, the mask in the fewest bytes. Spec: realme_t310.md#hold-cycle-write
+pub(super) fn hold_cycle_write_payload(mask: u32) -> Vec<u8> {
+    let mut payload = HOLD_CYCLE_QUERY.to_vec();
+    payload.extend(fewest_bytes(mask));
+    payload
+}
+
+/// The mask in a hold-cycle read reply. Spec: realme_t310.md#hold-cycle
+pub(super) fn decode_hold_cycle_mask(reply: &[u8]) -> Result<u32> {
+    noise_mask(reply, HOLD_CYCLE_QUERY, "the hold-cycle reply")
 }
 
 /// `00 <echo of the query> <mask, 1-4 bytes LE>`. Spec: realme_t310.md#anc-read
@@ -836,5 +878,28 @@ mod tests {
         let table = decode_gesture_entries(&hex("00 01 01 06 02 1D")).unwrap();
         let left = touch_target("left", "double-tap", "none").unwrap();
         assert!(matches!(retarget_gestures(&table, &left), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn hold_cycle_writes() {
+        assert_eq!(hold_cycle_mask(&["transparency", "anc"]).unwrap(), 0x0A);
+        assert_eq!(hold_cycle_mask(&["anc", "off", "transparency"]).unwrap(), 0x0B);
+        assert_eq!(hold_cycle_write_payload(0x0B), hex("02 01 0B"));
+        assert_eq!(hold_cycle_write_payload(0x09), hex("02 01 09"));
+        let usage = |modes: &[&str]| matches!(hold_cycle_mask(modes), Err(Error::Usage(_)));
+        assert!(usage(&["anc"]));
+        assert!(usage(&[]));
+        assert!(usage(&["anc", "anc"]));
+        assert!(usage(&["anc", "deep"]));
+        // What is written reads back as the same modes.
+        let mut reply = hex("00");
+        reply.extend(hold_cycle_write_payload(0x0B));
+        assert_eq!(decode_hold_cycle_mask(&reply).unwrap(), 0x0B);
+        assert_eq!(decode_hold_cycle(&reply).unwrap(), ["off", "transparency", "anc"]);
+        // The frame the spec gives (realme_t310.md#hold-cycle-write).
+        let frame =
+            crate::devices::realme_t310::frame::encode(NOISE_CONTROL_WRITE, 0x06, &hold_cycle_write_payload(0x0B))
+                .unwrap();
+        assert_eq!(crate::debug::hex(&frame), "AA 0A 00 00 04 04 06 03 00 02 01 0B");
     }
 }

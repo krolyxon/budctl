@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*); [§10.6](#gesture-write) touch controls (W8, verified *ours-2026-10-27*). Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*); [§10.6](#gesture-write) touch controls (W8, verified *ours-2026-10-27*); [§10.7](#hold-cycle-write) the hold cycle (W9, verified *ours-2026-10-27*). Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -438,7 +438,7 @@ The command and layout are *buds4*; the realme rules are *vendor*.
   - If the entry already has the action, it sends nothing.
   - `--dry-run` reads the table and prints the payload it would send, then stops.
   - After the ack it reads the table back 600 ms later, then every 300 ms until 2 s after the ack ([read-back](#write-read-back)).
-- **On the owner's T310** (*ours-2026-10-27*, W8): `touch left triple-tap volume-up` sent exactly the expected frame below. The ack came within 25 ms, and the first read-back (600 ms after the ack) already showed `fn 0B`. A second write, `volume-up` → `previous` (`fn 05`), behaved the same way. No push came. Not yet confirmed by ear: that the new triple tap really changes the volume or track.
+- **On the owner's T310** (*ours-2026-10-27*, W8): `touch left triple-tap volume-up` sent exactly the expected frame below. The ack came within 25 ms, and the first read-back (600 ms after the ack) already showed `fn 0B`. A second write, `volume-up` → `previous` (`fn 05`), behaved the same way. No push came. The owner confirmed that the new triple tap works.
 - **Expected frame** (*derived*, matched on the wire at W8), for `touch left triple-tap volume-up` on the owner's HW1 table, with seq `06`: `AA 20 00 00 01 04 06 19 00 06 01 01 02 01 01 01 03 0B 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08`.
 
 <a id="hold-cycle-write"></a>
@@ -449,6 +449,11 @@ Evidence: *vendor*
 - **Mask:** the fewest bytes that hold it, and at least 2 modes (*vendor*).
 - **Level bits.** The buds silently drop level bits (*buds4*).
 - **Check:** read `0x010C 02 01`.
+- **Reply:** `0x8404 <status>`, as for [§10.1](#anc-write).
+- **What budctl does** (budctl's own policy): `budctl touch cycle <mode> <mode> [<mode>]` accepts `off` (`01`), `transparency` (`02`) and `anc` (`08`), at least two of them and none twice, in any order, because the mask has no order. It never sets the level bits `04` and `10`. It reads the cycle back as for [§10.1](#write-read-back).
+- **Expected frame** (*derived*, matched on the wire at W9 apart from the seq byte), for all three modes with seq `06`: `AA 0A 00 00 04 04 06 03 00 02 01 0B`.
+- **On the owner's T310** (*ours-2026-10-27*, W9): `02 01 0B` (off, transparency, noise cancelling) and `02 01 09` (off, noise cancelling) were each acked with `0x8404 00` within 60 ms. The first read-back already showed the new mask. The owner confirmed that a hold steps through the new cycle. A cycle that includes `off` is accepted.
+- **On the owner's buds** the cycle is `0A` (transparency and noise cancelling, HW1), and every hold gesture is `fn 08`, so the cycle applies to both buds.
 
 <a id="fit-test"></a>
 ### 10.8 Fit test: `0x0405 01` / `0x0405 00`
@@ -526,7 +531,8 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
-| 2026-10-27 | W8 `touch left triple-tap volume-up` (`--dry-run`, then sent), then `previous` | pass (protocol) | The dry run's payload matched the derived frame. Both writes were acked and read back on the first try, 600 ms after the ack. The ack echoes the old table, cut short. Not yet confirmed by ear. The left triple tap is now `previous`. See [§10.6](#gesture-write) |
+| 2026-10-27 | W9 `touch cycle off transparency anc`, then `off anc` | pass | Masks `0B` and `09` were acked and read back on the first try. The owner confirmed the new cycle with the hold gesture. The cycle is now off → anc. See [§10.7](#hold-cycle-write) |
+| 2026-10-27 | W8 `touch left triple-tap volume-up` (`--dry-run`, then sent), then `previous` | pass | The dry run's payload matched the derived frame. Both writes were acked and read back on the first try, 600 ms after the ack. The ack echoes the old table, cut short. The owner confirmed that the new gesture works. The left triple tap is now `previous`. See [§10.6](#gesture-write) |
 | 2026-10-27 | W7 `find start --yes`, `find stop` | pass | Both acked. Both buds rang, kept ringing after budctl disconnected, and stopped on `find stop`. See [§10.5](#find) |
 | 2026-10-27 | W5d `set dual on`, `off` | pass | Acked, the immediate read-back showed the change, and the laptop stayed connected. Only one host was connected. See [§10.2](#switch-write) |
 | 2026-10-27 | W5c `set wind off`, `on` | pass (protocol) | Acked, and the immediate read-back showed the change. Not audible in music. See [§10.2](#switch-write) |

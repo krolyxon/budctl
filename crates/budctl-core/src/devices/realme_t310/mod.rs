@@ -366,6 +366,39 @@ impl Session for T310Session {
         })
     }
 
+    /// Spec: realme_t310.md#hold-cycle-write, #write-read-back
+    fn set_hold_cycle(&mut self, modes: &[&str]) -> Result<Vec<String>> {
+        let mask = codec::hold_cycle_mask(modes)?;
+        if !self.commands.allows(codec::NOISE_CONTROL_WRITE) || !self.commands.allows(codec::NOISE_CONTROL) {
+            return Err(Error::Unsupported(
+                "these buds do not offer noise-control settings".to_owned(),
+            ));
+        }
+        let reply = self
+            .link
+            .request(codec::NOISE_CONTROL_WRITE, &codec::hold_cycle_write_payload(mask))?;
+        codec::check_write_reply(&reply, "the hold-cycle change")?;
+
+        self.read_back(
+            READ_BACK,
+            codec::NOISE_CONTROL,
+            &codec::HOLD_CYCLE_QUERY,
+            |reply| {
+                Ok((
+                    codec::decode_hold_cycle_mask(reply)? == mask,
+                    codec::decode_hold_cycle(reply)?,
+                ))
+            },
+            |now| {
+                format!(
+                    "the buds accepted the hold cycle {}, but still report {}",
+                    modes.join(" → "),
+                    now.join(" → ")
+                )
+            },
+        )
+    }
+
     /// Spec: realme_t310.md#gesture-write, #gesture-choices
     fn set_touch(&mut self, side: &str, gesture: &str, action: &str, dry_run: bool) -> Result<TouchChange> {
         let target = codec::touch_target(side, gesture, action)?;
@@ -949,6 +982,34 @@ mod tests {
         let result = open(&script)
             .unwrap()
             .set_touch("left", "double-tap", "volume-up", false);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn sets_the_hold_cycle_and_reads_it_back() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0404, 0x05, "02 01 0B"),
+            rx(0x8404, 0x05, "00"),
+            tx(0x010C, 0x06, "02 01"),
+            rx(0x810C, 0x06, "00 02 01 0B"),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script)
+            .unwrap()
+            .set_hold_cycle(&["off", "transparency", "anc"])
+            .unwrap();
+        script.assert_done();
+        assert_eq!(now, ["off", "transparency", "anc"]);
+    }
+
+    #[test]
+    fn a_one_mode_hold_cycle_is_refused_before_anything_is_sent() {
+        let mut steps = handshake();
+        steps.pop();
+        let script = Script::new(steps);
+        let result = open(&script).unwrap().set_hold_cycle(&["anc"]);
         script.assert_done();
         assert!(matches!(result, Err(Error::Usage(_))));
     }

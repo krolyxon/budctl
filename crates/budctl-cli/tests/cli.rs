@@ -45,3 +45,17 @@ fn touch_changes_need_side_gesture_and_action() {
         assert_eq!(out.status.code(), Some(1), "{args:?}");
     }
 }
+
+#[test]
+fn the_hold_cycle_needs_two_or_three_known_modes() {
+    for args in [
+        &["touch", "cycle"][..],
+        &["touch", "cycle", "anc"],
+        &["touch", "cycle", "anc", "deep"],
+        &["touch", "cycle", "off", "transparency", "anc", "off"],
+        &["touch", "cycle", "anc", "off", "--dry-run"],
+    ] {
+        let out = budctl(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+    }
+}
