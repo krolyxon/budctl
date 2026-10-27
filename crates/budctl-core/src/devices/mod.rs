@@ -92,6 +92,14 @@ pub trait Session: Send {
         )))
     }
 
+    /// Give a custom EQ preset (`custom-<id>`) a new name. The buds save it, which also selects
+    /// it. Returns it as the buds list it afterwards.
+    fn rename_custom_eq(&mut self, preset: &str, _name: &str) -> Result<EqPreset> {
+        Err(Error::Unsupported(format!(
+            "budctl cannot rename {preset} on these buds"
+        )))
+    }
+
     /// Set the bass level. Only the ack can be checked when the buds cannot report the level.
     fn set_bass_level(&mut self, _level: i8) -> Result<()> {
         Err(Error::Unsupported(

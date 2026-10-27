@@ -510,7 +510,11 @@ Evidence: *vendor*
     - **A create selects the new preset** (*ours-2026-10-28*, W11c): in the list read after it, the new preset's `selected` byte is `01` and the others' are `00`.
     - **Expected frame** (*derived*), for `eq new Test` on the owner's list, with seq `06`: `AA 23 00 00 18 04 06 1C 00 01 FA 06 00 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00`.
     - **On the owner's T310** (*ours-2026-10-28*, W11c): that frame went out byte for byte. The buds answered `0x8418 00 05` within 50 ms. The list read 150 ms after the ack had two presets: Custom1 (id `04`, unchanged, `selected` `00`) and Test (id `05`, the six bands at 0 dB, `selected` `01`). So the reply's id was the listed id: no renumbering on this create.
-  - Renaming (a save with a new name) and deleting (`03`) come next, one checkpoint each.
+  - <a id="custom-eq-rename"></a>**W11d, rename**, wanted by the owner (2026-10-28): `budctl eq rename custom-<id> <name>` reads the list and saves (`02`) the preset as listed with only its name changed. The name follows the [create](#custom-eq-create) rules, and another preset's name is refused before anything is sent. Like any save, a rename also selects the preset.
+    - **Evidence:** *derived*. A save carries the name, and W11b saved the name back unchanged. That a save with a different name renames the preset in place, under the same id, is what this checkpoint tests.
+    - **Check:** read the list again, as for [read-back](#write-read-back). The preset with that id must have the new name.
+    - **Expected frame** (*derived*), for `eq rename custom-5 Gym` on the owner's list after W11c, with seq `06`: `AA 22 00 00 18 04 06 1B 00 02 FA 06 05 03 47 79 6D 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00`.
+  - Deleting (`03`) comes later, if it is wanted.
 
 <a id="absent"></a>
 ## 11. Not on the T310

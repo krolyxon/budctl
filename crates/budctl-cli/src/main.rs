@@ -68,7 +68,8 @@ enum Command {
     /// List the EQ presets, or select one (pure-raw, deep-bass, pure-vocals, pure-bass, custom-<id>) and read it back.
     ///
     /// For a custom preset, `<hz>=<gain>` pairs change those bands' gains (dB), then save and
-    /// select it: `budctl eq custom-4 50=+3 16000=-2`. `budctl eq new <name>` creates a preset.
+    /// select it: `budctl eq custom-4 50=+3 16000=-2`. `budctl eq new <name>` creates a preset,
+    /// `budctl eq rename custom-<id> <name>` renames one.
     #[command(args_conflicts_with_subcommands = true)]
     Eq {
         #[command(subcommand)]
@@ -117,6 +118,15 @@ enum EqCommand {
     /// Create a custom preset, flat, with the bands of the buds' custom presets, then read it back.
     New {
         /// Its name, 1 to 16 bytes.
+        #[arg(value_parser = parse_name)]
+        name: String,
+    },
+    /// Give a custom preset a new name, then read it back. The buds save it, which also selects
+    /// it.
+    Rename {
+        /// The preset, as `budctl eq` lists it: custom-<id>.
+        preset: String,
+        /// Its new name, 1 to 16 bytes.
         #[arg(value_parser = parse_name)]
         name: String,
     },
@@ -288,6 +298,13 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let created = session.create_custom_eq(name)?;
             output::created_eq(out, &device, model, &created, cli.json)
         }
+        Command::Eq {
+            action: Some(EqCommand::Rename { ref preset, ref name }),
+            ..
+        } => {
+            let now = session.rename_custom_eq(preset, name)?;
+            output::renamed_eq(out, &device, model, &now, cli.json)
+        }
         Command::Eq { preset: None, .. } => {
             let presets = session.eq_presets()?;
             output::eq_presets(out, &device, model, &presets, cli.json)
@@ -391,6 +408,11 @@ mod tests {
         assert!(matches!(
             parse(&["eq", "new", "Gym mix"]),
             Command::Eq { action: Some(EqCommand::New { name }), .. } if name == "Gym mix"
+        ));
+        assert!(matches!(
+            parse(&["eq", "rename", "custom-5", "Gym"]),
+            Command::Eq { action: Some(EqCommand::Rename { preset, name }), .. }
+                if preset == "custom-5" && name == "Gym"
         ));
     }
 }

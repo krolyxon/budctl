@@ -635,6 +635,15 @@ pub(super) fn new_custom_eq(name: &str, model: &CustomEq) -> Result<CustomEq> {
     })
 }
 
+/// The preset under a new name, and nothing else changed: saved with [`custom_eq_save_payload`],
+/// it is renamed. Spec: realme_t310.md#custom-eq-rename
+pub(super) fn renamed(preset: &CustomEq, name: &str) -> Result<CustomEq> {
+    Ok(CustomEq {
+        name: custom_eq_name(name)?,
+        ..preset.clone()
+    })
+}
+
 /// The id in a `0x0418` reply: `00 <id>`. Spec: realme_t310.md#custom-eq
 pub(super) fn decode_custom_eq_write_reply(reply: &[u8]) -> Result<u8> {
     let mut r = ok_reply(reply, "the custom EQ write")?;
@@ -1216,6 +1225,31 @@ mod tests {
             hex("AA 23 00 00 18 04 06 1C 00 01 FA 06 00 04 54 65 73 74 06 \
                  32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00")
         );
+    }
+
+    /// The owner's list after W11c: Custom1 (id 04) and Test (id 05, flat, selected).
+    const OWNER_AFTER_W11C: &str = "00 02 00 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 06 FA 00 03 E8 03 03 A0 0F 04 40 1F 06 80 3E 06 \
+         01 FA 06 05 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+
+    #[test]
+    fn renames_the_owners_new_preset() {
+        let list = decode_custom_eq_list(&hex(OWNER_AFTER_W11C)).unwrap();
+        let test = list.iter().find(|p| p.id == 0x05).unwrap();
+        let gym = renamed(test, "Gym").unwrap();
+        assert_eq!(
+            (gym.id, gym.bands.clone(), gym.name.clone()),
+            (0x05, test.bands.clone(), b"Gym".to_vec())
+        );
+        // Spec: realme_t310.md#custom-eq-rename (the expected frame, with seq 06)
+        let frame =
+            crate::devices::realme_t310::frame::encode(CUSTOM_EQ_WRITE, 0x06, &custom_eq_save_payload(&gym).unwrap())
+                .unwrap();
+        assert_eq!(
+            frame,
+            hex("AA 22 00 00 18 04 06 1B 00 02 FA 06 05 03 47 79 6D 06 \
+                 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00")
+        );
+        assert!(renamed(test, "").is_err());
     }
 
     #[test]

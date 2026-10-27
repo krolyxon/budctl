@@ -373,6 +373,26 @@ pub fn created_eq(
     Ok(())
 }
 
+/// A custom preset just renamed, as the buds list it.
+pub fn renamed_eq(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    now: &EqPreset,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(
+            out,
+            Some((device, model)),
+            serde_json::json!({ "renamed": format!("custom-{}", now.id), "preset": now }),
+        );
+    }
+    header(out, device, model)?;
+    writeln!(out, "  Renamed  custom-{} \"{}\"", now.id, now.name)?;
+    Ok(())
+}
+
 /// The EQ preset after a change, as the buds report it on reading back.
 pub fn eq(
     out: &mut impl Write,

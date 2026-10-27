@@ -424,6 +424,49 @@ impl Session for T310Session {
             .ok_or_else(|| Error::Protocol(format!("the new preset {name} vanished from the list")))
     }
 
+    /// Spec: realme_t310.md#custom-eq-rename, #write-read-back
+    fn rename_custom_eq(&mut self, preset: &str, name: &str) -> Result<EqPreset> {
+        let Some(id) = codec::custom_eq_id(preset) else {
+            return Err(Error::Usage(format!(
+                "{preset} is not a custom preset; those are named custom-<id>, as `budctl eq` lists them"
+            )));
+        };
+        if !self.commands.allows(codec::CUSTOM_EQ_WRITE) || !self.commands.allows(codec::CUSTOM_EQ_LIST) {
+            return Err(Error::Unsupported(
+                "these buds do not offer custom EQ presets".to_owned(),
+            ));
+        }
+        // A save carries the whole preset, so it starts from the list read just now.
+        let list = codec::decode_custom_eq_list(&self.link.request(codec::CUSTOM_EQ_LIST, &[])?)?;
+        let Some(current) = list.iter().find(|p| p.id == id) else {
+            return Err(Error::Usage(format!("these buds have no {preset}")));
+        };
+        if list.iter().any(|p| p.id != id && p.name == name.as_bytes()) {
+            return Err(Error::Usage(format!("a custom preset is called {name} already")));
+        }
+        let wanted = codec::renamed(current, name)?;
+        let reply = self
+            .link
+            .request(codec::CUSTOM_EQ_WRITE, &codec::custom_eq_save_payload(&wanted)?)?;
+        codec::check_write_reply(&reply, "renaming the custom EQ")?;
+        let now = self.read_back(
+            READ_BACK,
+            codec::CUSTOM_EQ_LIST,
+            &[],
+            |reply| {
+                let now = codec::decode_custom_eq_list(reply)?.into_iter().find(|p| p.id == id);
+                let applied = now.as_ref().is_some_and(|p| p.name == wanted.name);
+                Ok((applied, now))
+            },
+            |now| match now {
+                None => format!("the buds accepted the new name, but their list no longer has {preset}"),
+                Some(_) => format!("the buds accepted the new name, but still list {preset} under the old one"),
+            },
+        )?;
+        now.map(|p| p.preset())
+            .ok_or_else(|| Error::Protocol(format!("{preset} vanished from the list")))
+    }
+
     /// Spec: realme_t310.md#bass-write
     fn bass_range(&self) -> Option<(i8, i8)> {
         self.commands
@@ -1272,6 +1315,39 @@ mod tests {
         script.assert_done();
         assert_eq!((created.id, created.name.as_str()), (5, "Test"));
         assert_eq!(created.bands.len(), 6);
+    }
+
+    #[test]
+    fn renames_a_custom_preset_and_reads_it_back() {
+        const LIST: &str = "00 02 00 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 06 FA 00 03 E8 03 03 A0 0F 04 40 1F 06 80 3E 06 \
+             01 FA 06 05 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+        const AFTER: &str = "00 02 00 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 06 FA 00 03 E8 03 03 A0 0F 04 40 1F 06 80 3E 06 \
+             01 FA 06 05 03 47 79 6D 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0122, 0x05, ""),
+            rx(0x8122, 0x05, LIST),
+            tx(
+                0x0418,
+                0x06,
+                "02 FA 06 05 03 47 79 6D 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00",
+            ),
+            rx(0x8418, 0x06, "00 05"),
+            tx(0x0122, 0x07, ""),
+            rx(0x8122, 0x07, AFTER),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script).unwrap().rename_custom_eq("custom-5", "Gym").unwrap();
+        script.assert_done();
+        assert_eq!((now.id, now.name.as_str()), (5, "Gym"));
+
+        // Another preset's name is refused before anything is written.
+        let mut steps = handshake();
+        steps.extend([tx(0x0122, 0x05, ""), rx(0x8122, 0x05, LIST)]);
+        let script = Script::new(steps);
+        let taken = open(&script).unwrap().rename_custom_eq("custom-5", "Custom1");
+        script.assert_done();
+        assert!(matches!(taken, Err(Error::Usage(_))));
     }
 
     #[test]

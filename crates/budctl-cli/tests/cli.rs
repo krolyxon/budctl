@@ -27,12 +27,14 @@ fn usage_errors_exit_1() {
 }
 
 #[test]
-fn eq_new_checks_the_name_before_connecting() {
+fn eq_new_and_rename_check_the_name_before_connecting() {
     for args in [
         &["eq", "new"][..],
         &["eq", "new", ""],
         &["eq", "new", " Gym"],
         &["eq", "new", "a\tb"],
+        &["eq", "rename", "custom-5"],
+        &["eq", "rename", "custom-5", ""],
     ] {
         let out = budctl(args);
         assert_eq!(out.status.code(), Some(1), "{args:?}");
