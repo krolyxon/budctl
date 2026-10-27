@@ -507,8 +507,9 @@ Evidence: *vendor*
     - **The name:** 1 to 16 bytes of UTF-8, with no control characters and no spaces at either end. The 16 bytes are budctl's own limit: the protocol allows 255 (one length byte), and the vendor's limit is unknown.
     - **The new preset** copies the range bytes and the bands (frequencies and order) of the first listed preset, with every gain at 0 and id `00`. The vendor default bands do not hold on the T310 (see above).
     - **Check:** the reply `00 <id>` gives the new id. Ids can be renumbered after a create, so budctl reads the list again, as for [read-back](#write-read-back). It finds the preset by that id and its name, else by its name alone.
-    - **Unknown:** whether a create also selects the new preset. The read-back list shows it.
+    - **A create selects the new preset** (*ours-2026-10-28*, W11c): in the list read after it, the new preset's `selected` byte is `01` and the others' are `00`.
     - **Expected frame** (*derived*), for `eq new Test` on the owner's list, with seq `06`: `AA 23 00 00 18 04 06 1C 00 01 FA 06 00 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00`.
+    - **On the owner's T310** (*ours-2026-10-28*, W11c): that frame went out byte for byte. The buds answered `0x8418 00 05` within 50 ms. The list read 150 ms after the ack had two presets: Custom1 (id `04`, unchanged, `selected` `00`) and Test (id `05`, the six bands at 0 dB, `selected` `01`). So the reply's id was the listed id: no renumbering on this create.
   - Renaming (a save with a new name) and deleting (`03`) come next, one checkpoint each.
 
 <a id="absent"></a>
@@ -565,6 +566,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-28 | W11c `eq new Test` | pass | The create frame matched the derived one byte for byte, and was acked with `00 05`. The list read back at once has Test as id `05`, flat, and in use. See [§10.9](#custom-eq-create) |
 | 2026-10-27 | G5 `budctl-gui --debug`, Gestures page: left triple tap by dropdown and by `h`/`l`, transparency into the hold cycle and out | pass (protocol) | Every `0x0401` write (`06`, `03`, `0B`, `03`, `06`, then `05` to restore it) and both `0x0404 02 01` writes (`0B`, `09`) were acked and read back on the first try. Keys pressed during a write went out one by one as each write finished, and the last one was read back. A session closed after 10 s idle; the next pick opened a new one and wrote at once |
 | 2026-10-27 | G4 `budctl-gui --debug`, Equalizer page: the four built-in presets, a band drag on Custom1, then idle | pass (protocol) | `0x0406 00/01/02/03` were acked and read back on the first try. One drag (1 kHz from −6 to +3) sent one `0x0418 02` write: acked `00 04`, and the read-back list shows the new gain with `selected` `01`. The session closed 10 s after the last command, three times; a read when the window got focus after 30 s opened a new session each time. `h`/`l` on a band is not covered yet |
 | 2026-10-27 | G3 `budctl-gui --debug`: the first reading, then noise control transparency → noise cancelling, game mode on → off | pass (protocol) | One session for the reading and all four writes, with no new connection between them. The acks and read-backs match W1 and W3; the game-mode read-back, 1 s after the ack, showed the change. The window named the custom preset from the `0x0122` list. No request from the buds came in while the session waited. The log ends about 1 s after the last write, so the 10 s idle close is not in it yet |
