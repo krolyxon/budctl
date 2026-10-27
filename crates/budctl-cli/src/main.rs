@@ -77,10 +77,16 @@ enum Command {
     /// Ring the buds so you can find them (loud: take them out of your ears first).
     Find {
         #[arg(value_enum)]
-        action: FindAction,
+        action: StartStop,
         /// Confirm that the buds are out of your ears. Needed to start ringing.
         #[arg(long)]
         yes: bool,
+    },
+    /// Check how well each bud seals in your ear. Keep both buds in your ears; it takes about 10 s.
+    FitTest {
+        /// `stop` ends a test that is still running.
+        #[arg(value_enum, default_value = "start")]
+        action: StartStop,
     },
     /// Turn game mode (low latency) on or off, then read it back.
     Game {
@@ -90,7 +96,7 @@ enum Command {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum FindAction {
+enum StartStop {
     Start,
     Stop,
 }
@@ -206,7 +212,7 @@ fn main() -> ExitCode {
 fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
     // Checked before connecting: ringing is loud. Spec: realme_t310.md#find
     if let Command::Find {
-        action: FindAction::Start,
+        action: StartStop::Start,
         yes: false,
     } = cli.command
     {
@@ -263,9 +269,24 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             output::switch(out, &device, model, &now, cli.json)
         }
         Command::Find { action, .. } => {
-            let ring = matches!(action, FindAction::Start);
+            let ring = matches!(action, StartStop::Start);
             session.find(ring)?;
             output::find(out, &device, model, ring, cli.json)
+        }
+        Command::FitTest {
+            action: StartStop::Start,
+        } => {
+            if !cli.json {
+                eprintln!("Running the fit test: keep both buds in your ears…");
+            }
+            let buds = session.fit_test()?;
+            output::fit_test(out, &device, model, &buds, cli.json)
+        }
+        Command::FitTest {
+            action: StartStop::Stop,
+        } => {
+            session.stop_fit_test()?;
+            output::fit_test_stopped(out, &device, model, cli.json)
         }
         Command::Game { state } => {
             let now = session.set_switch("game", matches!(state, OnOff::On))?;

@@ -113,6 +113,15 @@ pub struct Gesture {
     pub group: Option<u8>,
 }
 
+/// One bud's result in a fit test.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BudFit {
+    /// `left` or `right`.
+    pub side: String,
+    /// `good`, `average` or `poor`, or `unknown (…)` for a value the device module cannot name.
+    pub fit: String,
+}
+
 /// A touch-control change: what changes, the write that does it and, once sent, the table the
 /// buds report afterwards.
 #[derive(Debug, Serialize)]

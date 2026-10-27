@@ -71,6 +71,18 @@ impl Link {
         Ok(())
     }
 
+    /// Like [`Self::pump_until`], but stop at the first frame `wanted` picks and return what it
+    /// returned. `None` when `deadline` passes first.
+    pub(super) fn wait_for<T>(&mut self, deadline: Instant, wanted: impl Fn(&Frame) -> Option<T>) -> Result<Option<T>> {
+        while let Some(frame) = self.next_frame(deadline)? {
+            if let Some(found) = wanted(&frame) {
+                return Ok(Some(found));
+            }
+            self.handle_unsolicited(frame)?;
+        }
+        Ok(None)
+    }
+
     /// Send a request and return the payload of its reply.
     pub(super) fn request(&mut self, cmd: u16, payload: &[u8]) -> Result<Vec<u8>> {
         let seq = self.send(cmd, payload)?;

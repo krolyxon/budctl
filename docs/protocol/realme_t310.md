@@ -463,6 +463,14 @@ Evidence: *buds4*
 - `01` starts the test and `00` stops it.
 - **Result:** arrives as push `04 (<dev> <result>)…`, where `1` = good, `0` = average and `6` = poor. The push needs event `04` subscribed.
 - **Timing:** about 8.6 s on Buds 4. Both buds must be in the ears.
+- **What budctl does** (budctl's own policy):
+  - `budctl fit-test` runs only if `0x0405` is allowed and the session subscribed to event `04` ([subscribe](#subscribe)). Without the subscription no result could arrive.
+  - It sends `0x0405 01`, checks the `0x8405` status, then waits up to **15 s** for the event-`04` push, skipping and answering other frames meanwhile.
+  - If no result comes, it sends `0x0405 00` to stop the test and exits 4.
+  - After a result it sends nothing more. Whether the buds end the test on their own is still to be checked at W10.
+  - `budctl fit-test stop` sends `0x0405 00`.
+- **Expected frames** (*derived*), with seq `05`: start `AA 08 00 00 05 04 05 01 00 01`, stop `AA 08 00 00 05 04 05 01 00 00`.
+- **Not yet seen on a T310.** What the buds do while testing (a tone?), whether they reply `0E` without an in-ear sensor, and the shape of the result are all to be checked at W10.
 
 <a id="custom-eq"></a>
 ### 10.9 Custom EQ: list `0x0122`, write `0x0418`

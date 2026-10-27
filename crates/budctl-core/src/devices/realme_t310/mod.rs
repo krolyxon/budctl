@@ -9,7 +9,9 @@ use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
-use crate::status::{GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls};
+use crate::status::{
+    BudFit, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls,
+};
 use crate::transport::Transport;
 
 mod codec;
@@ -43,6 +45,9 @@ const TOUCH_READ_BACK: ReadBack = ReadBack {
     first: Duration::from_millis(600),
     window: Duration::from_secs(2),
 };
+/// How long budctl waits for the fit-test result after the ack: Buds 4 take about 8.6 s.
+/// Spec: realme_t310.md#fit-test
+const FIT_TEST_WAIT: Duration = Duration::from_secs(15);
 /// Spec: realme_t310.md#write-read-back
 const READ_BACK_PAUSE: Duration = Duration::from_millis(300);
 
@@ -100,6 +105,8 @@ fn unix_time() -> u32 {
 struct T310Session {
     link: Link,
     commands: Commands,
+    /// Whether the session subscribed to fit-test results. Spec: realme_t310.md#subscribe
+    fit_results: bool,
 }
 
 /// Collects what a series of best-effort reads produced.
@@ -132,11 +139,17 @@ impl T310Session {
 
         let offered = codec::decode_events_offered(&link.request(codec::EVENTS_OFFERED, &[])?)?;
         let subscription = codec::subscribe_payload(&offered, &commands);
+        let mut fit_results = false;
         if commands.allows(codec::SUBSCRIBE) && subscription.len() > 1 {
             // Some buds never acknowledge this, so budctl does not wait. Spec: realme_t310.md#subscribe
             link.send(codec::SUBSCRIBE, &subscription)?;
+            fit_results = subscription.iter().skip(1).any(|&code| code == codec::FIT_EVENT);
         }
-        Ok(Self { link, commands })
+        Ok(Self {
+            link,
+            commands,
+            fit_results,
+        })
     }
 
     /// Read and decode one value, if the buds offer the command. A read the buds answer badly
@@ -364,6 +377,43 @@ impl Session for T310Session {
             hold_cycle,
             warnings: reads.warnings,
         })
+    }
+
+    /// Spec: realme_t310.md#fit-test
+    fn fit_test(&mut self) -> Result<Vec<BudFit>> {
+        if !self.commands.allows(codec::FIT_TEST) || !self.fit_results {
+            return Err(Error::Unsupported("these buds do not offer a fit test".to_owned()));
+        }
+        let reply = self.link.request(codec::FIT_TEST, &codec::fit_test_payload(true))?;
+        codec::check_write_reply(&reply, "starting the fit test")?;
+
+        let deadline = Instant::now() + FIT_TEST_WAIT;
+        let result = self.link.wait_for(deadline, |frame| {
+            codec::is_fit_push(frame.cmd, &frame.payload).then(|| codec::decode_fit_push(&frame.payload))
+        })?;
+        match result {
+            Some(buds) => buds,
+            None => {
+                // Do not leave the test running. Spec: realme_t310.md#fit-test
+                let stopped = match self.stop_fit_test() {
+                    Ok(()) => "budctl stopped the test".to_owned(),
+                    Err(error) => format!("stopping it failed too: {error}"),
+                };
+                Err(Error::Timeout(format!(
+                    "no fit-test result within {} s; {stopped}",
+                    FIT_TEST_WAIT.as_secs()
+                )))
+            }
+        }
+    }
+
+    /// Spec: realme_t310.md#fit-test
+    fn stop_fit_test(&mut self) -> Result<()> {
+        if !self.commands.allows(codec::FIT_TEST) {
+            return Err(Error::Unsupported("these buds do not offer a fit test".to_owned()));
+        }
+        let reply = self.link.request(codec::FIT_TEST, &codec::fit_test_payload(false))?;
+        codec::check_write_reply(&reply, "stopping the fit test")
     }
 
     /// Spec: realme_t310.md#hold-cycle-write, #write-read-back
@@ -1012,5 +1062,58 @@ mod tests {
         let result = open(&script).unwrap().set_hold_cycle(&["anc"]);
         script.assert_done();
         assert!(matches!(result, Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn runs_a_fit_test_and_waits_for_the_result() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0405, 0x05, "01"),
+            rx(0x8405, 0x05, "00"),
+            // Other pushes may come first; they are skipped.
+            rx(0x0204, 0x20, "01 03 01 5A 02 5A 03 00"),
+            rx(0x0204, 0x21, "04 01 01 02 00"),
+        ]);
+        let script = Script::new(steps);
+        let buds = open(&script).unwrap().fit_test().unwrap();
+        script.assert_done();
+        let rows: Vec<(&str, &str)> = buds.iter().map(|b| (b.side.as_str(), b.fit.as_str())).collect();
+        assert_eq!(rows, [("left", "good"), ("right", "average")]);
+    }
+
+    #[test]
+    fn a_fit_test_with_no_result_is_stopped() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0405, 0x05, "01"),
+            rx(0x8405, 0x05, "00"),
+            // No result: the wait runs out, and budctl stops the test.
+            tx(0x0405, 0x06, "00"),
+            rx(0x8405, 0x06, "00"),
+        ]);
+        let script = Script::new(steps);
+        let result = open(&script).unwrap().fit_test();
+        script.assert_done();
+        match result {
+            Err(Error::Timeout(message)) => assert!(message.ends_with("budctl stopped the test")),
+            other => panic!("expected a timeout, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_fit_test_without_the_result_subscription() {
+        // The buds offer no event 04, so no result could ever arrive: nothing is sent.
+        let script = Script::new(vec![
+            tx(0x0100, 0x01, ""),
+            rx(0x8100, 0x01, codec::T310_BITMAP_REPLY),
+            tx(0x0103, 0x02, ""),
+            rx(0x8103, 0x02, "00 12 3C 06"),
+            tx(0x0200, 0x03, ""),
+            rx(0x8200, 0x03, "00 03 01 02 03"),
+            tx(0x0205, 0x04, "03 01 02 03"),
+        ]);
+        let result = open(&script).unwrap().fit_test();
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Unsupported(_))));
     }
 }
