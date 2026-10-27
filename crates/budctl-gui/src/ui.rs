@@ -38,6 +38,24 @@ pub fn card<'a>(look: Look, rows: Vec<Element<'a, Message>>) -> Element<'a, Mess
         .into()
 }
 
+/// A rounded panel like a card, around content of its own.
+pub fn panel<'a>(look: Look, content: Element<'a, Message>) -> Element<'a, Message> {
+    let p = look.p;
+    container(content)
+        .padding(24)
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(p.surface.into()),
+            border: Border {
+                color: p.line,
+                width: 1.0,
+                radius: 18.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
 fn separator<'a>(look: Look) -> Element<'a, Message> {
     let p = look.p;
     container(rule::horizontal(1).style(move |_| rule::Style {
@@ -51,7 +69,7 @@ fn separator<'a>(look: Look) -> Element<'a, Message> {
 }
 
 /// A setting row: icon, title, an optional subtitle, and something on the right. The whole row
-/// is the click target.
+/// is the click target. `focused`: the keyboard cursor is on it.
 pub fn setting<'a>(
     look: Look,
     icon: Icon,
@@ -59,6 +77,7 @@ pub fn setting<'a>(
     subtitle: Option<String>,
     trailing: Element<'a, Message>,
     on_press: Message,
+    focused: bool,
 ) -> Element<'a, Message> {
     let p = look.p;
     let words = column![text(title).size(15).font(look.medium()).color(p.fg)]
@@ -74,12 +93,21 @@ pub fn setting<'a>(
         .padding(0)
         .width(Length::Fill)
         .style(move |_, status| button::Style {
-            background: hovered(status).then_some(p.surface_high.into()),
+            background: (focused || hovered(status)).then_some(p.surface_high.into()),
             text_color: p.fg,
-            border: Border::default().rounded(14),
+            border: cursor(p, focused, 14.0),
             ..button::Style::default()
         })
         .into()
+}
+
+/// The keyboard cursor: a 2 px accent frame. No frame without it.
+fn cursor(p: crate::theme::Palette, focused: bool, radius: f32) -> Border {
+    Border {
+        color: p.accent,
+        width: if focused { 2.0 } else { 0.0 },
+        radius: radius.into(),
+    }
 }
 
 fn hovered(status: button::Status) -> bool {
@@ -119,8 +147,8 @@ pub struct Segment<'a> {
 }
 
 /// A pill of choices with the selected one filled, like the noise-control modes. `large` puts an
-/// icon above each label.
-pub fn segmented<'a>(look: Look, segments: Vec<Segment<'a>>, large: bool) -> Element<'a, Message> {
+/// icon above each label. `focused`: the keyboard cursor is on it.
+pub fn segmented<'a>(look: Look, segments: Vec<Segment<'a>>, large: bool, focused: bool) -> Element<'a, Message> {
     let p = look.p;
     let mut choices = Row::new().spacing(4);
     for segment in segments {
@@ -158,10 +186,14 @@ pub fn segmented<'a>(look: Look, segments: Vec<Segment<'a>>, large: bool) -> Ele
         .width(Length::Fill)
         .style(move |_| container::Style {
             background: Some(p.surface.into()),
-            border: Border {
-                color: p.line,
-                width: 1.0,
-                radius: 999.0.into(),
+            border: if focused {
+                cursor(p, true, 999.0)
+            } else {
+                Border {
+                    color: p.line,
+                    width: 1.0,
+                    radius: 999.0.into(),
+                }
             },
             ..container::Style::default()
         })

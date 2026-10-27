@@ -8,18 +8,33 @@ use crate::demo::Buds;
 use crate::icons::{self, Icon, Part, RingColors};
 use crate::theme::Look;
 use crate::ui::{self, Segment};
-use crate::{Message, Page};
+use crate::{Item, Message, Page};
 
-pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel) -> Element<'a, Message> {
+/// What the keyboard cursor can rest on, top to bottom, as [`view`] shows them.
+pub fn items(buds: &Buds) -> Vec<Item> {
+    let mut items = Vec::new();
+    if let Some(now) = &buds.status.noise_control {
+        items.push(Item::NoiseMode);
+        if now.mode == NoiseMode::Anc(AncLevel::Deep).name() {
+            items.push(Item::AncLevel);
+        }
+    }
+    items.extend(shown(&buds.status.switches).into_iter().map(|s| Item::Switch(s.key)));
+    items.extend(MORE.map(|(page, _, _)| Item::Open(page)));
+    items
+}
+
+/// `focus` is the item under the keyboard cursor, if it shows.
+pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel, focus: Option<Item>) -> Element<'a, Message> {
     column![ui::title(look, "Overview"), battery(look, buds)]
         .push(
             buds.status
                 .noise_control
                 .as_ref()
-                .map(|now| noise_control(look, &now.mode, anc_level)),
+                .map(|now| noise_control(look, &now.mode, anc_level, focus)),
         )
-        .push(switches(look, &buds.status.switches))
-        .push(more(look, buds))
+        .push(switches(look, &buds.status.switches, focus))
+        .push(more(look, buds, focus))
         .spacing(18)
         .into()
 }
@@ -65,7 +80,7 @@ fn battery<'a>(look: Look, buds: &Buds) -> Element<'a, Message> {
     ui::card(look, vec![container(gauges).padding([22, 8]).into()])
 }
 
-fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel) -> Element<'a, Message> {
+fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel, focus: Option<Item>) -> Element<'a, Message> {
     let modes = [
         (Icon::NoiseOff, "Off", NoiseMode::Off),
         (Icon::Anc, "Noise cancelling", NoiseMode::Anc(anc_level)),
@@ -95,11 +110,11 @@ fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel) -> Element<'a,
     .collect();
     let strength = row![
         text("Strength").size(13.5).color(look.p.dim).width(Length::Fill),
-        container(ui::segmented(look, levels, false)).width(300)
+        container(ui::segmented(look, levels, false, focus == Some(Item::AncLevel))).width(300)
     ]
     .align_y(Alignment::Center)
     .padding([0, 8]);
-    column![ui::segmented(look, segments, true)]
+    column![ui::segmented(look, segments, true, focus == Some(Item::NoiseMode))]
         .push((mode == NoiseMode::Anc(anc_level).name()).then_some(strength))
         .spacing(12)
         .into()
@@ -115,8 +130,8 @@ const SWITCHES: [(&str, Icon, &str); 5] = [
     ("dual", Icon::Dual, "Stay connected to two devices at once"),
 ];
 
-fn switches<'a>(look: Look, switches: &[Switch]) -> Element<'a, Message> {
-    let known = |key: &str| SWITCHES.iter().find(|(k, _, _)| *k == key);
+/// The switches in the order the page shows them.
+fn shown(switches: &[Switch]) -> Vec<&Switch> {
     let rank = |s: &&Switch| {
         SWITCHES
             .iter()
@@ -125,7 +140,12 @@ fn switches<'a>(look: Look, switches: &[Switch]) -> Element<'a, Message> {
     };
     let mut shown: Vec<&Switch> = switches.iter().collect();
     shown.sort_by_key(rank);
-    let rows = shown
+    shown
+}
+
+fn switches<'a>(look: Look, switches: &[Switch], focus: Option<Item>) -> Element<'a, Message> {
+    let known = |key: &str| SWITCHES.iter().find(|(k, _, _)| *k == key);
+    let rows = shown(switches)
         .into_iter()
         .map(|s| {
             let (icon, subtitle) = known(s.key).map_or((Icon::Settings, None), |&(_, icon, subtitle)| {
@@ -138,34 +158,39 @@ fn switches<'a>(look: Look, switches: &[Switch]) -> Element<'a, Message> {
                 subtitle,
                 ui::switch(look, s.on),
                 Message::Switch(s.key, !s.on),
+                focus == Some(Item::Switch(s.key)),
             )
         })
         .collect();
     ui::card(look, rows)
 }
 
-fn more<'a>(look: Look, buds: &Buds) -> Element<'a, Message> {
-    let open = |icon, title, subtitle: &str, page| {
-        ui::setting(
-            look,
-            icon,
-            title,
-            Some(subtitle.to_owned()),
-            ui::chevron(look),
-            Message::Open(page),
-        )
-    };
-    ui::card(
-        look,
-        vec![
-            open(Icon::Equalizer, "Equalizer", &buds.eq_name, Page::Equalizer),
-            open(Icon::Gestures, "Gestures", "Taps and holds on each bud", Page::Gestures),
-            open(
-                Icon::Earbud,
-                "Earbud settings",
-                "Find my earbuds, firmware",
-                Page::Earbuds,
-            ),
-        ],
-    )
+/// The rows that open other pages: the page, its icon and title.
+const MORE: [(Page, Icon, &str); 3] = [
+    (Page::Equalizer, Icon::Equalizer, "Equalizer"),
+    (Page::Gestures, Icon::Gestures, "Gestures"),
+    (Page::Earbuds, Icon::Earbud, "Earbud settings"),
+];
+
+fn more<'a>(look: Look, buds: &Buds, focus: Option<Item>) -> Element<'a, Message> {
+    let rows = MORE
+        .into_iter()
+        .map(|(page, icon, title)| {
+            let subtitle = match page {
+                Page::Equalizer => buds.eq_name.clone(),
+                Page::Gestures => "Taps and holds on each bud".to_owned(),
+                _ => "Find my earbuds, firmware".to_owned(),
+            };
+            ui::setting(
+                look,
+                icon,
+                title,
+                Some(subtitle),
+                ui::chevron(look),
+                Message::Open(page),
+                focus == Some(Item::Open(page)),
+            )
+        })
+        .collect();
+    ui::card(look, rows)
 }

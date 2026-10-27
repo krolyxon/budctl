@@ -119,7 +119,11 @@ Exit codes:
 
 - **Look:** a sidebar (device card, pages) and pages of cards: battery rings, a segmented noise-control pill, rows of switches. The owner's reference is a screenshot of another buds app; match the look, never its code (rule 2).
 - **Theme:** a built-in dark palette with a red accent. Optionally, a matugen JSON file with the same keys as the owner's Aurora palette (`~/.cache/matugen/aurora.json`: `bg`, `fg`, `primary`, `surface`…), mapped to the same roles as Aurora's `Theme.qml`. It is read again whenever the window gets focus.
-- **Input:** the mouse and touchpad come first. Vim-like keys are a layer on top: `j`/`k` move a cursor, `h`/`l` change the value under it. The cursor shows only after a key press.
+- **Input:** the mouse and touchpad come first. Vim-like keys are a layer on top (`keys.rs`, `?` lists them in the window):
+  - `j`/`k`, the arrows or Tab move a cursor over what the page can change; `gg`/`G` jump to the first or last item.
+  - `h`/`l` pick the previous or next choice, or turn a switch off or on, and `l` opens a row's page. Enter and Space toggle, step round the choices, or open.
+  - `J`/`K`, `Ctrl+Tab`, `gt`/`gT` and `1`–`5` change pages. `Esc` hides the cursor, `q` quits.
+  - The cursor shows only after a key press, and the first key only shows it, so nothing changes where it cannot be seen. A click hides it.
 - **Logic:** keys and clicks both become messages for one `update` function, which stays testable without a display. `iced_test` renders pages to PNG, so the look can be checked without the owner.
 
 ## Working with Claude
