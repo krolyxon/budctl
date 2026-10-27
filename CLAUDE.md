@@ -1,13 +1,13 @@
 # budctl
 
-budctl is a Linux CLI (and later a GUI) for controlling wireless earbuds without the vendor app. It has no telemetry, needs no account and never makes a network call.
+budctl is a Linux CLI and GUI for controlling wireless earbuds without the vendor app. It has no telemetry and needs no account.
 
 The first supported device is the **realme Buds T310**. More devices are added as plugins when the owner gets new earbuds.
 
 ## Goals
 
 - Control earbud features from Linux: ANC / transparency / off, EQ presets, game mode, touch controls, battery readout, and anything else the buds offer.
-- Two front ends, one core: a `budctl` CLI and later a `budctl-gui`, both thin layers over the same library (`budctl-core`). The GUI is undecided. It will be either a Quickshell/Aurora integration (which can use `budctl --json`) or a standalone Rust GUI.
+- Two front ends, one core: the `budctl` CLI and the `budctl-gui` desktop app, both thin layers over the same library (`budctl-core`). Scripts and the owner's Quickshell (Aurora) can use `budctl --json`.
 - One small, readable codebase that the owner fully understands.
 - Device support is pluggable. Adding a new pair of buds means adding one module under `crates/budctl-core/src/devices/` and registering it in `devices/mod.rs`, without touching transport, CLI or GUI code.
 - Coexist with the phone app. Settings live on the buds, so budctl never stores device state locally beyond user config.
@@ -15,15 +15,17 @@ The first supported device is the **realme Buds T310**. More devices are added a
 ## Non-goals
 
 - No firmware dumping, flashing or modification. We only speak the buds' existing control protocol.
-- No network access of any kind: no update checks, crash reports or analytics.
+- No telemetry of any kind: no analytics, crash reports or usage data, and no update checks.
 - No support for models the owner doesn't have. Don't speculatively add devices.
 - No Windows or macOS support.
 
 ## Hard rules
 
-1. **No network code.** Nothing in this workspace may open a socket except a Bluetooth socket (RFCOMM for the control link, L2CAP for SDP).
-   - The one exception, approved by the owner: the local system D-Bus Unix socket, used through `zbus` only to talk to BlueZ (`org.bluez`). budctl opens that socket itself at the fixed path, so an environment variable can never redirect it to TCP.
-   - No HTTP clients (reqwest, hyper, ureq, surf, etc.) may appear in the dependency tree, direct or transitive. This is enforced with `cargo deny` (`deny.toml`), clippy `disallowed-types`, and `crates/budctl-core/tests/guards.rs`.
+1. **No telemetry; network only when a feature needs it.** The owner relaxed this rule on 2026-10-27: network access is fine when a feature truly needs it, but nothing may ever report on the user. No feature needs the network so far. The sockets budctl opens today:
+   - Bluetooth sockets: RFCOMM for the control link, L2CAP for SDP.
+   - The local system D-Bus Unix socket, used through `zbus` only to talk to BlueZ (`org.bluez`). budctl opens that socket itself at the fixed path, so an environment variable can never redirect it to TCP.
+   - `budctl-gui` only: the Wayland compositor's Unix socket. The GUI is built for Wayland only (no X11), so `DISPLAY` can never point it at TCP.
+   - HTTP clients (reqwest, hyper, ureq, surf, etc.) stay banned until a feature needs one. The bans live in `cargo deny` (`deny.toml`), clippy `disallowed-types` and `crates/budctl-core/tests/guards.rs`. Lifting one is fine then; say why in the commit.
 2. **Clean-room protocol work.** Protocol facts (UUIDs, channel numbers, packet framing, command IDs, init sequences) may come from public references, but no other project's source code is ever translated or copied. Write findings into `docs/protocol/<device>.md` in our own words, then implement from that spec.
    - Committed files do not name or cite those references. Each fact carries an evidence level instead (rule 3).
    - Only the owner can change this rule, by editing it here.
@@ -37,7 +39,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 - Rust (edition 2024) in a cargo workspace:
   - `crates/budctl-core`: library with transport, BlueZ and device plugins.
   - `crates/budctl-cli`: package and binary `budctl`.
-  - `crates/budctl-gui` will come later.
+  - `crates/budctl-gui`: package and binary `budctl-gui`, built with iced 0.14 for Wayland only, with the CPU renderer (tiny-skia).
 - Bluetooth goes through BlueZ:
   - Raw `AF_BLUETOOTH` sockets via `libc`: RFCOMM for the control link, L2CAP to read the buds' SDP record.
   - `zbus` (blocking API) only to list paired devices.
@@ -47,6 +49,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 - Keep dependencies minimal. Every new dependency needs a reason in the commit message. The current direct dependencies:
   - core: `libc`, `zbus`, `serde`
   - cli: `clap`, `serde_json`
+  - gui: `iced`, `serde`, `serde_json`; `iced_test` for tests
 
 ## Device plugin contract
 
@@ -109,8 +112,15 @@ Exit codes:
    9. hold cycle
    10. ~~fit test~~ (dropped: the T310 acks it but runs no test)
    11. custom EQ
-4. **GUI**: Quickshell/Aurora via `--json`, or a Rust GUI on top of the same core.
+4. **GUI** (`budctl-gui`, see [GUI](#gui)): first the look, with demo data; then the keys; then the live connection; then the pages, one at a time.
 5. **More devices**: as acquired.
+
+## GUI
+
+- **Look:** a sidebar (device card, pages) and pages of cards: battery rings, a segmented noise-control pill, rows of switches. The owner's reference is a screenshot of another buds app; match the look, never its code (rule 2).
+- **Theme:** a built-in dark palette with a red accent. Optionally, a matugen JSON file with the same keys as the owner's Aurora palette (`~/.cache/matugen/aurora.json`: `bg`, `fg`, `primary`, `surface`…), mapped to the same roles as Aurora's `Theme.qml`. It is read again whenever the window gets focus.
+- **Input:** the mouse and touchpad come first. Vim-like keys are a layer on top: `j`/`k` move a cursor, `h`/`l` change the value under it. The cursor shows only after a key press.
+- **Logic:** keys and clicks both become messages for one `update` function, which stays testable without a display. `iced_test` renders pages to PNG, so the look can be checked without the owner.
 
 ## Working with Claude
 

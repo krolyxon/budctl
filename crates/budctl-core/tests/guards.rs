@@ -1,6 +1,6 @@
 //! Checks for the CLAUDE.md hard rules that the compiler and clippy cannot make on their own.
 //!
-//! - Rule 1: no network code in our sources, and no banned crate (deny.toml) in Cargo.lock.
+//! - Rule 1: no network code in our sources, and no banned crate (deny.toml) in a Linux build.
 //! - Rule 3: every `Spec: <file>.md#<anchor>` comment points at an anchor that exists.
 //!
 //! The CLI's exit codes are checked in crates/budctl-cli/tests/cli.rs.
@@ -11,6 +11,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -94,25 +95,50 @@ fn banned_crates() -> BTreeSet<String> {
     names
 }
 
-#[test]
-fn no_banned_crate_in_lockfile() {
-    let lock = fs::read_to_string(workspace().join("Cargo.lock")).unwrap();
-    let locked: BTreeSet<&str> = lock
+/// The crates a Linux build of the workspace uses, tests included, for the targets deny.toml
+/// checks. Cargo.lock is no help here: it also lists crates that only other platforms build (iced's
+/// lock entries include tokio, for wasm).
+fn built_crates() -> BTreeSet<String> {
+    let out = Command::new(env!("CARGO"))
+        .current_dir(workspace())
+        .args(["tree", "--offline", "--locked", "--workspace", "--all-features"])
+        .args(["--edges", "normal,build,dev", "--prefix", "none", "--format", "{p}"])
+        .args([
+            "--target",
+            "x86_64-unknown-linux-gnu",
+            "--target",
+            "aarch64-unknown-linux-gnu",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "cargo tree failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let names: BTreeSet<String> = String::from_utf8(out.stdout)
+        .unwrap()
         .lines()
-        .filter_map(|l| l.strip_prefix("name = \""))
-        .filter_map(|l| l.strip_suffix('"'))
+        .filter_map(|line| line.split_whitespace().next())
+        .map(str::to_owned)
         .collect();
     assert!(
-        locked.contains("budctl-core"),
-        "could not read crate names from Cargo.lock"
+        names.contains("budctl-core") && names.contains("libc"),
+        "could not read crate names from cargo tree"
     );
+    names
+}
+
+#[test]
+fn no_banned_crate_in_the_build() {
+    let built = built_crates();
     let found: Vec<String> = banned_crates()
         .into_iter()
-        .filter(|b| locked.contains(b.as_str()))
+        .filter(|banned| built.contains(banned))
         .collect();
     assert!(
         found.is_empty(),
-        "banned crates in Cargo.lock (see deny.toml): {found:?}"
+        "banned crates in the build (see deny.toml): {found:?}"
     );
 }
 
