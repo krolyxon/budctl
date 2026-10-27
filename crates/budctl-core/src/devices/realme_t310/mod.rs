@@ -319,6 +319,16 @@ impl Session for T310Session {
         )
     }
 
+    /// Ack-only: the T310 never answers the bass-level read. Spec: realme_t310.md#bass-write
+    fn set_bass_level(&mut self, level: i8) -> Result<()> {
+        let payload = codec::bass_write_payload(level)?;
+        if !self.commands.allows(codec::BASS_LEVEL_WRITE) {
+            return Err(Error::Unsupported("these buds do not offer a bass level".to_owned()));
+        }
+        let reply = self.link.request(codec::BASS_LEVEL_WRITE, &payload)?;
+        codec::check_write_reply(&reply, "the bass-level change")
+    }
+
     /// Spec: realme_t310.md#find
     fn find(&mut self, ring: bool) -> Result<()> {
         if !self.commands.allows(codec::FIND) {
@@ -1068,5 +1078,24 @@ mod tests {
         let bands: Vec<u16> = eq.presets.last().unwrap().bands.iter().map(|b| b.hz).collect();
         assert_eq!(bands, [50, 250, 1000, 4000, 8000, 16000]);
         assert!(eq.warnings.is_empty());
+    }
+
+    #[test]
+    fn sets_the_bass_level() {
+        let mut steps = handshake();
+        steps.extend([tx(0x041B, 0x05, "FB 05 FE"), rx(0x841B, 0x05, "00")]);
+        let script = Script::new(steps);
+        open(&script).unwrap().set_bass_level(-2).unwrap();
+        script.assert_done();
+    }
+
+    #[test]
+    fn a_bass_level_out_of_range_is_refused_before_anything_is_sent() {
+        let mut steps = handshake();
+        steps.pop();
+        let script = Script::new(steps);
+        let result = open(&script).unwrap().set_bass_level(6);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Usage(_))));
     }
 }

@@ -27,6 +27,22 @@ pub(super) const SWITCH_WRITE: u16 = 0x0403;
 pub(super) const EQ_SELECT: u16 = 0x0406;
 /// Spec: realme_t310.md#find
 pub(super) const FIND: u16 = 0x0400;
+/// Spec: realme_t310.md#bass-write
+pub(super) const BASS_LEVEL_WRITE: u16 = 0x041B;
+/// The bass-level range. Spec: realme_t310.md#bass-write
+pub(super) const BASS_RANGE: (i8, i8) = (-5, 5);
+
+/// `FB 05 <level s8>`: the range bytes, then the level. Spec: realme_t310.md#bass-write
+pub(super) fn bass_write_payload(level: i8) -> Result<[u8; 3]> {
+    let (min, max) = BASS_RANGE;
+    if !(min..=max).contains(&level) {
+        return Err(Error::Usage(format!(
+            "the bass level goes from {min} to +{max}; {level} is outside"
+        )));
+    }
+    let [min, max, level] = [min, max, level].map(|v| v.to_le_bytes()[0]);
+    Ok([min, max, level])
+}
 /// Spec: realme_t310.md#gesture-write
 pub(super) const GESTURE_WRITE: u16 = 0x0401;
 
@@ -947,5 +963,19 @@ mod tests {
         // Cut short inside the bands.
         assert!(decode_custom_eqs(&hex("00 01 01 FA 06 04 02 4D 65 02 3E 00")).is_err());
         assert_eq!(builtin_eqs().len(), 4);
+    }
+
+    #[test]
+    fn bass_level_payloads() {
+        assert_eq!(bass_write_payload(0).unwrap(), [0xFB, 0x05, 0x00]);
+        assert_eq!(bass_write_payload(5).unwrap(), [0xFB, 0x05, 0x05]);
+        assert_eq!(bass_write_payload(-2).unwrap(), [0xFB, 0x05, 0xFE]);
+        assert_eq!(bass_write_payload(-5).unwrap(), [0xFB, 0x05, 0xFB]);
+        assert!(matches!(bass_write_payload(6), Err(Error::Usage(_))));
+        assert!(matches!(bass_write_payload(-6), Err(Error::Usage(_))));
+        // The frame the spec gives (realme_t310.md#bass-write).
+        let frame = crate::devices::realme_t310::frame::encode(BASS_LEVEL_WRITE, 0x05, &bass_write_payload(3).unwrap())
+            .unwrap();
+        assert_eq!(crate::debug::hex(&frame), "AA 0A 00 00 1B 04 05 03 00 FB 05 03");
     }
 }

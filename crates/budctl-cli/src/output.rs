@@ -335,6 +335,25 @@ pub fn eq(
     Ok(())
 }
 
+/// After `bass <level>`: the buds acked; they cannot report the level back.
+pub fn bass_level(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    level: i8,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(out, Some((device, model)), serde_json::json!({ "bass_level": level }));
+    }
+    header(out, device, model)?;
+    writeln!(
+        out,
+        "  Bass level  {level:+} (accepted; the buds cannot report it back)"
+    )?;
+    Ok(())
+}
+
 /// After `find start` or `find stop`: the buds acked; there is nothing to read back.
 pub fn find(
     out: &mut impl Write,

@@ -362,7 +362,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*); [§10.6](#gesture-write) touch controls (W8, verified *ours-2026-10-27*); [§10.7](#hold-cycle-write) the hold cycle (W9, verified *ours-2026-10-27*). The fit test ([§10.8](#fit-test), W10) is acked but does nothing on the T310; it is dropped. Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*); [§10.6](#gesture-write) touch controls (W8, verified *ours-2026-10-27*); [§10.7](#hold-cycle-write) the hold cycle (W9, verified *ours-2026-10-27*); [§10.4](#bass-write) the bass level (W6b, acked *ours-2026-10-27*; the effect is faint by ear and cannot be read back). The fit test ([§10.8](#fit-test), W10) is acked but does nothing on the T310; it is dropped. The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -411,7 +411,10 @@ Evidence: *vendor*
 Evidence: *vendor*
 
 - **Range:** -5..+5.
-- **Check:** read `0x0124` again.
+- **Check:** read `0x0124` again. **Not possible on the T310**, which never answers that read ([§9.7](#bass-read-w6)), so budctl checks only the `0x841B` status and the owner listens.
+- **What budctl does:** `budctl bass <level>` refuses a level outside -5..+5 before sending anything.
+- **Expected frame** (*derived*), for `bass 3` with seq `05`: `AA 0A 00 00 1B 04 05 03 00 FB 05 03`.
+- **On the owner's T310** (*ours-2026-10-27*, W6b): `FB 05 FB` (-5), `FB 05 05` (+5) and `FB 05 00` (0) were each acked with a plain `0x841B 00` within 35 ms. Unlike the gesture write, the ack carries no data. Bass boost was off. By ear the owner heard at most a slight difference between -5 and +5. Whether the level does more with bass boost on is untested.
 
 <a id="find"></a>
 ### 10.5 Find my earbuds: `0x0400 01` / `0x0400 00`
@@ -549,6 +552,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W6b `bass -5`, `bass 5`, `bass 0` (bass boost off) | pass (protocol) | All acked with `0x841B 00`. No read-back is possible. By ear, at most a slight difference. See [§10.4](#bass-write) |
 | 2026-10-27 | W11a `eq` (custom list `0x0122`) | pass | One preset, "Custom1" (id `04`, 6 flat bands from 50 Hz), and it is the EQ in use. See [§10.9](#custom-eq) |
 | 2026-10-27 | W6a `status` with bass boost on (`0x0124`) | fail: no reply | Still no answer in 3 s. budctl does not send it. See [§9.7](#bass-read) |
 | 2026-10-27 | W10 `fit-test` | fail: no test | Start and stop were acked, but no result push and no sound came in 15 s. The owner dropped the fit test. See [§10.8](#fit-test) |

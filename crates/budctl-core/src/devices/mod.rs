@@ -62,6 +62,13 @@ pub trait Session: Send {
         ))
     }
 
+    /// Set the bass level. Only the ack can be checked when the buds cannot report the level.
+    fn set_bass_level(&mut self, _level: i8) -> Result<()> {
+        Err(Error::Unsupported(
+            "budctl cannot change the bass level on these buds".to_owned(),
+        ))
+    }
+
     /// Start (`true`) or stop ringing the buds so they can be found. Only the ack can be
     /// checked: there is no state to read back.
     fn find(&mut self, _ring: bool) -> Result<()> {

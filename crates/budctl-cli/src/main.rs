@@ -74,6 +74,12 @@ enum Command {
         #[arg(value_enum)]
         state: OnOff,
     },
+    /// Set the bass level, -5 to +5. The buds cannot report it back, so only their ack is checked.
+    Bass {
+        /// Checked here, before connecting; core checks it again.
+        #[arg(allow_negative_numbers = true, value_parser = clap::value_parser!(i8).range(-5..=5))]
+        level: i8,
+    },
     /// Ring the buds so you can find them (loud: take them out of your ears first).
     Find {
         #[arg(value_enum)]
@@ -267,6 +273,10 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         Command::Set { ref switch, state } => {
             let now = session.set_switch(switch, matches!(state, OnOff::On))?;
             output::switch(out, &device, model, &now, cli.json)
+        }
+        Command::Bass { level } => {
+            session.set_bass_level(level)?;
+            output::bass_level(out, &device, model, level, cli.json)
         }
         Command::Find { action, .. } => {
             let ring = matches!(action, FindAction::Start);
