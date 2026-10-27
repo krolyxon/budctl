@@ -450,9 +450,23 @@ impl Session for T310Session {
             &codec::HOLD_CYCLE_QUERY,
             codec::decode_hold_cycle,
         )?;
+        // The choices only when the buds take writes: the GUI offers what it shows here.
+        let writable = |cmd| self.commands.allows(cmd);
+        let choices = if writable(codec::GESTURE_WRITE) {
+            codec::touch_choices()
+        } else {
+            Vec::new()
+        };
+        let cycle_modes = if hold_cycle.is_some() && writable(codec::NOISE_CONTROL_WRITE) {
+            codec::cycle_modes()
+        } else {
+            Vec::new()
+        };
         Ok(TouchControls {
             gestures,
             hold_cycle,
+            choices,
+            cycle_modes,
             warnings: reads.warnings,
         })
     }
@@ -770,6 +784,11 @@ mod tests {
         script.assert_done();
         assert_eq!(touch.gestures.len(), 2);
         assert_eq!(touch.hold_cycle.unwrap(), ["transparency", "anc"]);
+        let gestures: Vec<&str> = touch.choices.iter().map(|c| c.gesture.as_str()).collect();
+        assert_eq!(gestures, ["double-tap", "triple-tap", "hold"]);
+        let hold = touch.choices.iter().find(|c| c.gesture == "hold").unwrap();
+        assert_eq!(hold.actions, ["none", "noise-cycle", "voice-assistant", "game-mode"]);
+        assert_eq!(touch.cycle_modes, ["off", "transparency", "anc"]);
     }
 
     /// The owner's `budctl --debug touch` (HW1), byte for byte. The buds' own frames (slice

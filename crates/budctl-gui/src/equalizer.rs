@@ -59,7 +59,7 @@ pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a Draft>, marks: Mar
                 buds::shown_name(preset),
                 Some(subtitle.to_owned()),
                 mark,
-                Message::Preset(preset.id),
+                Some(Message::Preset(preset.id)),
                 marks.focus == Some(Item::Preset(preset.id)),
             )
         })

@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use budctl_core::bt::BdAddr;
 use budctl_core::devices::Session;
-use budctl_core::status::{EqBand, EqPreset, EqPresets, NoiseControl, NoiseMode, Status, Switch};
+use budctl_core::status::{
+    EqBand, EqPreset, EqPresets, Gesture, NoiseControl, NoiseMode, Status, Switch, TouchControls,
+};
 use budctl_core::{Error, Kind, Result};
 use iced::futures::channel::mpsc as channel;
 use iced::futures::{SinkExt, Stream, StreamExt};
@@ -34,6 +36,14 @@ pub enum Command {
     /// Save a custom EQ preset (`custom-<id>`) with these bands changed, which also selects it.
     /// With no bands, it only selects it.
     CustomEq(String, Vec<EqBand>),
+    /// Give a bud's gesture an action, by name: `left`, `double-tap`, `play-pause`.
+    Touch {
+        side: String,
+        gesture: String,
+        action: String,
+    },
+    /// Set the noise-control modes a hold steps through.
+    HoldCycle(Vec<String>),
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +62,10 @@ pub enum Event {
     Eq(String),
     /// The answer to [`Command::CustomEq`]: the preset, as read back.
     CustomEq(EqPreset),
+    /// The answer to [`Command::Touch`]: the whole gesture table, as read back.
+    Touch(Vec<Gesture>),
+    /// The answer to [`Command::HoldCycle`]: the modes, as read back.
+    HoldCycle(Vec<String>),
     /// The answer to a command that failed. The session is closed; the next command opens a
     /// new one.
     Failed { kind: Kind, message: String },
@@ -64,6 +78,8 @@ pub struct Reading {
     pub status: Status,
     /// The EQ presets, when the buds can list them: they name the custom ones.
     pub eq: Option<EqPresets>,
+    /// The touch controls, when the buds report them.
+    pub touch: Option<TouchControls>,
 }
 
 /// The worker, as a stream of events for an iced subscription. `device` picks the buds, as
@@ -183,6 +199,16 @@ impl Worker {
                 .session()
                 .and_then(|session| session.set_custom_eq(&preset, &bands))
                 .map(Event::CustomEq),
+            Command::Touch { side, gesture, action } => self
+                .session()
+                .and_then(|session| session.set_touch(&side, &gesture, &action, false))
+                .map(|change| Event::Touch(change.gestures)),
+            Command::HoldCycle(modes) => {
+                let modes: Vec<&str> = modes.iter().map(String::as_str).collect();
+                self.session()
+                    .and_then(|session| session.set_hold_cycle(&modes))
+                    .map(Event::HoldCycle)
+            }
         };
         match answer {
             Ok(event) => self.send(event),
@@ -200,7 +226,8 @@ impl Worker {
         let session = self.session()?;
         let status = session.status()?;
         let eq = session.eq_presets().ok();
-        Ok(Reading { status, eq })
+        let touch = session.touch_controls().ok();
+        Ok(Reading { status, eq, touch })
     }
 
     /// The open session, opening one first if there is none.

@@ -92,12 +92,25 @@ pub struct Switch {
     pub on: bool,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct TouchControls {
     pub gestures: Vec<Gesture>,
     /// Noise-control modes a hold steps through, when the device has that setting.
     pub hold_cycle: Option<Vec<String>>,
+    /// The actions each gesture can be given, when the device can change them.
+    pub choices: Vec<GestureChoice>,
+    /// The modes the hold cycle can include, when the device can change it.
+    pub cycle_modes: Vec<String>,
     pub warnings: Vec<String>,
+}
+
+/// The actions one gesture can be given, as the device offers them, in its order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GestureChoice {
+    /// `double-tap`, `triple-tap`, `hold`…
+    pub gesture: String,
+    /// `none`, `play-pause`…
+    pub actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

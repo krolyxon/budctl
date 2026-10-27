@@ -1,7 +1,9 @@
 //! The buds the window shows: made-up ones for `--demo` (roughly what the owner's T310 reported
 //! at the last checkpoints), or an empty pair until the real buds answer.
 
-use budctl_core::status::{Battery, Charge, EqBand, EqPreset, EqPresets, NoiseControl, Status, Switch};
+use budctl_core::status::{
+    Battery, Charge, EqBand, EqPreset, EqPresets, Gesture, GestureChoice, NoiseControl, Status, Switch, TouchControls,
+};
 
 /// The buds the window shows.
 pub struct Buds {
@@ -10,6 +12,8 @@ pub struct Buds {
     pub status: Status,
     /// The EQ presets, when the buds list them.
     pub eq: Option<EqPresets>,
+    /// The touch controls, when the buds report them.
+    pub touch: Option<TouchControls>,
 }
 
 impl Buds {
@@ -43,6 +47,16 @@ impl Buds {
     pub fn preset(&self, id: u8) -> Option<&EqPreset> {
         self.eq.as_ref()?.presets.iter().find(|p| p.id == id)
     }
+
+    /// What a gesture of a bud (`left`, `right`) does now.
+    pub fn action(&self, side: &str, gesture: &str) -> Option<&str> {
+        self.touch
+            .as_ref()?
+            .gestures
+            .iter()
+            .find(|g| g.side == side && g.gesture == gesture && g.group.is_none())
+            .map(|g| g.action.as_str())
+    }
 }
 
 /// The made-up buds of `--demo`.
@@ -57,6 +71,17 @@ pub fn demo() -> Buds {
         range: None,
     };
     let band = |hz, gain| EqBand { hz, gain };
+    let gesture = |side: &str, gesture: &str, action: &str| Gesture {
+        side: side.to_owned(),
+        gesture: gesture.to_owned(),
+        action: action.to_owned(),
+        group: None,
+    };
+    let choice = |gesture: &str, actions: &[&str]| GestureChoice {
+        gesture: gesture.to_owned(),
+        actions: actions.iter().map(|&a| a.to_owned()).collect(),
+    };
+    let names = |names: &[&str]| names.iter().map(|&n| n.to_owned()).collect::<Vec<_>>();
     Buds {
         name: "realme Buds T310".to_owned(),
         connected: true,
@@ -107,6 +132,35 @@ pub fn demo() -> Buds {
             ],
             warnings: Vec::new(),
         }),
+        touch: Some(TouchControls {
+            gestures: vec![
+                gesture("left", "double-tap", "play-pause"),
+                gesture("left", "triple-tap", "previous"),
+                gesture("left", "hold", "noise-cycle"),
+                gesture("right", "double-tap", "play-pause"),
+                gesture("right", "triple-tap", "next"),
+                gesture("right", "hold", "noise-cycle"),
+            ],
+            hold_cycle: Some(names(&["off", "anc"])),
+            choices: vec![
+                choice("double-tap", &["none", "play-pause", "next", "voice-assistant"]),
+                choice(
+                    "triple-tap",
+                    &[
+                        "none",
+                        "previous",
+                        "next",
+                        "voice-assistant",
+                        "volume-up",
+                        "volume-down",
+                        "game-mode",
+                    ],
+                ),
+                choice("hold", &["none", "noise-cycle", "voice-assistant", "game-mode"]),
+            ],
+            cycle_modes: names(&["off", "transparency", "anc"]),
+            warnings: Vec::new(),
+        }),
     }
 }
 
@@ -117,6 +171,7 @@ pub fn unknown() -> Buds {
         connected: false,
         status: Status::default(),
         eq: None,
+        touch: None,
     }
 }
 
@@ -151,7 +206,7 @@ pub fn eq_name(current: Option<&str>, presets: Option<&EqPresets>) -> String {
 }
 
 /// `pure-bass` → "Pure bass".
-fn words(name: &str) -> String {
+pub fn words(name: &str) -> String {
     let words = name.replace('-', " ");
     let mut letters = words.chars();
     letters

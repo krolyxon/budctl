@@ -3,7 +3,9 @@
 
 use crate::error::{Error, Result};
 use crate::reader::Reader;
-use crate::status::{AncLevel, Battery, Charge, EqBand, EqPreset, Gesture, NoiseControl, NoiseMode, Switch};
+use crate::status::{
+    AncLevel, Battery, Charge, EqBand, EqPreset, Gesture, GestureChoice, NoiseControl, NoiseMode, Switch,
+};
 
 /// Spec: realme_t310.md#bitmap
 pub(super) const HANDSHAKE: u16 = 0x0100;
@@ -640,6 +642,28 @@ const TOUCH_CHOICES: [(u8, &[u8]); 3] = [
     // hold: none, noise-control cycle, voice assistant, game mode
     (0x04, &[0x00, 0x08, 0x03, 0x11]),
 ];
+
+/// The actions each gesture can be given, by name, in realme Link's order.
+/// Spec: realme_t310.md#gesture-choices
+pub(super) fn touch_choices() -> Vec<GestureChoice> {
+    TOUCH_CHOICES
+        .iter()
+        .filter_map(|&(act, functions)| {
+            Some(GestureChoice {
+                gesture: name_of(&ACTS, act)?.to_owned(),
+                actions: functions
+                    .iter()
+                    .filter_map(|&f| name_of(&FUNCTIONS, f).map(str::to_owned))
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+/// The modes a hold cycle can include, by name. Spec: realme_t310.md#hold-cycle-write
+pub(super) fn cycle_modes() -> Vec<String> {
+    CYCLE_MODES.iter().map(|&(_, name)| name.to_owned()).collect()
+}
 
 /// A checked `touch <side> <gesture> <action>`: the bud ids, the act and the fn to write.
 #[derive(Debug, PartialEq, Eq)]

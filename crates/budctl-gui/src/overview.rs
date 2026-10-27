@@ -165,7 +165,7 @@ fn switches<'a>(look: Look, switches: &[Switch], marks: Marks) -> Element<'a, Me
                 s.label,
                 subtitle,
                 ui::switch(look, s.on),
-                Message::Switch(s.key, !s.on),
+                Some(Message::Switch(s.key, !s.on)),
                 marks.focus == Some(Item::Switch(s.key)),
             )
         })
@@ -195,7 +195,7 @@ fn more<'a>(look: Look, buds: &Buds, focus: Option<Item>) -> Element<'a, Message
                 title,
                 Some(subtitle),
                 ui::chevron(look),
-                Message::Open(page),
+                Some(Message::Open(page)),
                 focus == Some(Item::Open(page)),
             )
         })

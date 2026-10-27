@@ -8,6 +8,11 @@ use crate::Message;
 use crate::icons::{self, Icon};
 use crate::theme::Look;
 
+/// A heading above a card.
+pub fn heading<'a>(look: Look, words: &'a str) -> Element<'a, Message> {
+    text(words).size(15).font(look.medium()).color(look.p.dim).into()
+}
+
 /// A page title.
 pub fn title<'a>(look: Look, title: &'a str) -> Element<'a, Message> {
     text(title).size(30).font(look.bold()).color(look.p.fg).into()
@@ -68,15 +73,15 @@ fn separator<'a>(look: Look) -> Element<'a, Message> {
     .into()
 }
 
-/// A setting row: icon, title, an optional subtitle, and something on the right. The whole row
-/// is the click target. `focused`: the keyboard cursor is on it.
+/// A setting row: icon, title, an optional subtitle, and something on the right. With
+/// `on_press`, the whole row is the click target. `focused`: the keyboard cursor is on it.
 pub fn setting<'a>(
     look: Look,
     icon: Icon,
     title: impl text::IntoFragment<'a>,
     subtitle: Option<String>,
     trailing: Element<'a, Message>,
-    on_press: Message,
+    on_press: Option<Message>,
     focused: bool,
 ) -> Element<'a, Message> {
     let p = look.p;
@@ -89,7 +94,7 @@ pub fn setting<'a>(
         .align_y(Alignment::Center)
         .padding([13, 16]);
     button(content)
-        .on_press(on_press)
+        .on_press_maybe(on_press)
         .padding(0)
         .width(Length::Fill)
         .style(move |_, status| button::Style {

@@ -6,6 +6,7 @@
 
 mod buds;
 mod equalizer;
+mod gestures;
 mod icons;
 mod keys;
 mod overview;
@@ -181,6 +182,10 @@ enum Item {
     Preset(u8),
     /// One band of a custom EQ preset: the preset's id and the band's frequency.
     Band(u8, u16),
+    /// A bud's gesture, by its place among the Gestures page's rows.
+    Gesture(u8),
+    /// A mode of the hold cycle, by its place among the modes the buds offer.
+    Cycle(u8),
 }
 
 /// What a page needs besides the buds: the item under the keyboard cursor, if it shows, and the
@@ -189,6 +194,14 @@ enum Item {
 struct Marks<'a> {
     focus: Option<Item>,
     pending: &'a [Item],
+}
+
+/// A gesture's action picked on the screen and not on the buds yet.
+#[derive(Debug, Clone, PartialEq)]
+struct TouchDraft {
+    /// The gesture, by its place among the Gestures page's rows.
+    row: u8,
+    action: String,
 }
 
 /// Bands of a custom EQ preset moved on the screen and not saved on the buds yet.
@@ -230,6 +243,14 @@ enum Message {
     },
     /// Save the moved bands of a custom EQ preset.
     SaveBands(u8),
+    /// Give a gesture (by its row) an action. With `save`, write it right away.
+    Action {
+        row: u8,
+        action: String,
+        save: bool,
+    },
+    /// Put a mode (by its place) in the hold cycle, or take it out.
+    Cycle(u8, bool),
     /// Read the buds again.
     Refresh,
     Worker(Event),
@@ -268,6 +289,8 @@ struct App {
     read_at: Option<Instant>,
     /// Bands moved and not saved yet.
     draft: Option<Draft>,
+    /// A gesture's action picked and not written yet.
+    touch_draft: Option<TouchDraft>,
 }
 
 impl App {
@@ -300,6 +323,7 @@ impl App {
             in_flight: VecDeque::new(),
             read_at: None,
             draft: None,
+            touch_draft: None,
         };
         app.refresh_palette();
         app
@@ -318,6 +342,13 @@ impl App {
                 }
             }
             Message::SaveBands(preset) => self.save_bands(preset),
+            Message::Action { row, action, save } => {
+                self.touch_draft = Some(TouchDraft { row, action });
+                if save {
+                    self.save_touch(row);
+                }
+            }
+            Message::Cycle(mode, on) => self.cycle(mode, on),
             Message::Refresh => self.refresh(),
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
@@ -352,6 +383,22 @@ impl App {
                     }
                 }
                 Command::Eq(preset) => self.buds.set_eq(preset),
+                Command::Touch { side, gesture, action } => {
+                    if let Some(entry) = self.buds.touch.as_mut().and_then(|touch| {
+                        touch
+                            .gestures
+                            .iter_mut()
+                            .find(|g| g.side == side && g.gesture == gesture && g.group.is_none())
+                    }) {
+                        entry.action = action;
+                    }
+                    self.touch_draft = None;
+                }
+                Command::HoldCycle(modes) => {
+                    if let Some(touch) = &mut self.buds.touch {
+                        touch.hold_cycle = Some(modes);
+                    }
+                }
                 Command::CustomEq(_, bands) => {
                     if let Some(preset) = self.buds.preset(item_preset(item)) {
                         let mut preset = preset.clone();
@@ -377,6 +424,7 @@ impl App {
             Link::Demo => {
                 self.buds = buds::demo();
                 self.draft = None;
+                self.touch_draft = None;
             }
             _ if self.in_flight.contains(&None) => {}
             _ => {
@@ -448,12 +496,34 @@ impl App {
                     _ => {}
                 }
             }
+            Event::Touch(gestures) => {
+                let done = self.in_flight.pop_front();
+                if let Some(touch) = &mut self.buds.touch {
+                    touch.gestures = gestures;
+                }
+                self.link = Link::Live;
+                // An action picked while this write was on its way goes out now.
+                if let Some(Some(Item::Gesture(row))) = done {
+                    self.save_touch(row);
+                }
+            }
+            Event::HoldCycle(modes) => {
+                self.in_flight.pop_front();
+                if let Some(touch) = &mut self.buds.touch {
+                    touch.hold_cycle = Some(modes);
+                }
+                self.link = Link::Live;
+            }
             Event::Failed { kind, message } => {
-                if let Some(Some(Item::Preset(id))) = self.in_flight.pop_front() {
-                    // The buds keep what they had: show that, not the moved bands.
-                    if self.draft.as_ref().is_some_and(|draft| draft.preset == id) {
+                // The buds keep what they had: show that, not what was picked.
+                match self.in_flight.pop_front() {
+                    Some(Some(Item::Preset(id))) if self.draft.as_ref().is_some_and(|d| d.preset == id) => {
                         self.draft = None;
                     }
+                    Some(Some(Item::Gesture(row))) if self.touch_draft.as_ref().is_some_and(|d| d.row == row) => {
+                        self.touch_draft = None;
+                    }
+                    _ => {}
                 }
                 if kind == Kind::NotFound {
                     self.buds.connected = false;
@@ -465,6 +535,7 @@ impl App {
 
     fn apply_reading(&mut self, reading: Reading) {
         self.buds.eq = reading.eq;
+        self.buds.touch = reading.touch;
         if let Some(level) = reading
             .status
             .noise_control
@@ -540,6 +611,63 @@ impl App {
         }
     }
 
+    /// A gesture row: the bud, the gesture, and the actions it takes.
+    fn gesture_row(&self, row: u8) -> Option<(&'static str, String, Vec<String>)> {
+        let touch = self.buds.touch.as_ref()?;
+        let rows = gestures::rows(touch);
+        let found = rows.get(usize::from(row))?;
+        Some((found.side, found.gesture.to_owned(), found.actions.to_vec()))
+    }
+
+    /// The action a gesture row has: the one picked on the screen, else the buds' own.
+    fn gesture_action(&self, row: u8) -> Option<String> {
+        if let Some(draft) = self.touch_draft.as_ref().filter(|draft| draft.row == row) {
+            return Some(draft.action.clone());
+        }
+        let (side, gesture, _) = self.gesture_row(row)?;
+        self.buds.action(side, &gesture).map(str::to_owned)
+    }
+
+    /// Writes the action picked for a gesture row. If a write to it is on its way, the pick
+    /// goes out when that is answered: the latest pick wins.
+    fn save_touch(&mut self, row: u8) {
+        let Some(draft) = self.touch_draft.clone().filter(|draft| draft.row == row) else {
+            return;
+        };
+        let Some((side, gesture, _)) = self.gesture_row(row) else {
+            return;
+        };
+        if self.buds.action(side, &gesture) == Some(draft.action.as_str()) {
+            self.touch_draft = None;
+        } else if !self.pending().contains(&Item::Gesture(row)) {
+            let command = Command::Touch {
+                side: side.to_owned(),
+                gesture,
+                action: draft.action,
+            };
+            self.write(Item::Gesture(row), command);
+        }
+    }
+
+    /// Puts a mode in the hold cycle or takes it out. The buds need two modes to step
+    /// through, so the last two stay.
+    fn cycle(&mut self, mode: u8, on: bool) {
+        let Some(touch) = &self.buds.touch else {
+            return;
+        };
+        let (Some(name), Some(now)) = (touch.cycle_modes.get(usize::from(mode)), &touch.hold_cycle) else {
+            return;
+        };
+        let mut modes: Vec<String> = now.iter().filter(|m| *m != name).cloned().collect();
+        if on {
+            modes.push(name.clone());
+        }
+        let busy = self.pending().iter().any(|item| matches!(item, Item::Cycle(_)));
+        if modes.len() >= 2 && !busy {
+            self.write(Item::Cycle(mode), Command::HoldCycle(modes));
+        }
+    }
+
     /// The items with a write on its way.
     fn pending(&self) -> Vec<Item> {
         self.in_flight.iter().flatten().copied().collect()
@@ -596,6 +724,7 @@ impl App {
         match self.page {
             Page::Overview if self.has_reading() => overview::items(&self.buds),
             Page::Equalizer if self.has_reading() => equalizer::items(&self.buds),
+            Page::Gestures if self.has_reading() => gestures::items(&self.buds),
             _ => Vec::new(),
         }
     }
@@ -689,6 +818,31 @@ impl App {
                     save: true,
                 })
             }
+            Item::Gesture(row) => {
+                let (_, _, actions) = self.gesture_row(row)?;
+                let now = self.gesture_action(row)?;
+                let places: Vec<usize> = (0..actions.len()).collect();
+                let at = actions.iter().position(|a| *a == now);
+                let to = step(&places, at, action)?;
+                actions.get(to).map(|action| Message::Action {
+                    row,
+                    action: action.clone(),
+                    save: true,
+                })
+            }
+            Item::Cycle(mode) => {
+                let touch = self.buds.touch.as_ref()?;
+                let on = touch
+                    .hold_cycle
+                    .as_ref()?
+                    .contains(touch.cycle_modes.get(usize::from(mode))?);
+                let want = match action {
+                    Action::Left => false,
+                    Action::Right => true,
+                    _ => !on,
+                };
+                (want != on).then_some(Message::Cycle(mode, want))
+            }
         }
     }
 
@@ -754,6 +908,13 @@ impl App {
                     pending: &pending,
                 };
                 equalizer::view(look, &self.buds, self.draft.as_ref(), marks)
+            }
+            Page::Gestures if self.has_reading() => {
+                let marks = Marks {
+                    focus: self.focus(),
+                    pending: &pending,
+                };
+                gestures::view(look, &self.buds, self.touch_draft.as_ref(), marks)
             }
             page => column![
                 ui::title(look, page.title()),
@@ -981,6 +1142,7 @@ mod tests {
         Reading {
             status: buds::demo().status,
             eq: buds::demo().eq,
+            touch: buds::demo().touch,
         }
     }
 
@@ -1311,6 +1473,60 @@ mod tests {
         assert_eq!(gain(&app.buds.preset(4).unwrap().bands), Some(3));
     }
 
+    fn cycle(app: &App) -> Vec<String> {
+        app.buds.touch.as_ref().unwrap().hold_cycle.clone().unwrap()
+    }
+
+    #[test]
+    fn gestures_and_the_hold_cycle_by_key() {
+        let mut app = app();
+        press(&mut app, "3 j j");
+        assert_eq!(app.page, Page::Gestures);
+        assert_eq!(app.focus(), Some(Item::Gesture(1)));
+        press(&mut app, "l");
+        assert_eq!(app.buds.action("left", "triple-tap"), Some("next"));
+        press(&mut app, "h h h");
+        assert_eq!(
+            app.buds.action("left", "triple-tap"),
+            Some("none"),
+            "it stops at the first"
+        );
+
+        press(&mut app, "G k l");
+        assert_eq!(app.focus(), Some(Item::Cycle(1)));
+        assert_eq!(cycle(&app), ["off", "anc", "transparency"]);
+        press(&mut app, "h");
+        assert_eq!(cycle(&app), ["off", "anc"]);
+        press(&mut app, "j h");
+        assert_eq!(cycle(&app), ["off", "anc"], "a hold needs two modes");
+    }
+
+    #[test]
+    fn gesture_picks_wait_for_the_write_before_them() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        press(&mut app, "3 j j l");
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::Touch { side, gesture, action })
+                if side == "left" && gesture == "triple-tap" && action == "next"
+        ));
+        // While that write is on its way, picks only change the screen.
+        press(&mut app, "l l");
+        assert!(commands.try_recv().is_err());
+        assert_eq!(app.gesture_action(1).as_deref(), Some("volume-up"));
+        // The answer comes: the latest pick goes out at once.
+        let mut table = reading().touch.unwrap().gestures;
+        table[1].action = "next".to_owned();
+        let _ = app.update(Message::Worker(Event::Touch(table)));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::Touch { action, .. }) if action == "volume-up"
+        ));
+        assert_eq!(app.pending(), [Item::Gesture(1)]);
+    }
+
     #[test]
     fn steps() {
         let abc = ['a', 'b', 'c'];
@@ -1363,6 +1579,7 @@ mod tests {
         shots.push(("overview-cursor".to_owned(), 800.0, on(Page::Overview, "j j j j")));
         shots.push(("keys".to_owned(), 800.0, on(Page::Overview, "?")));
         shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k")));
+        shots.push(("gestures-cursor".to_owned(), 1000.0, on(Page::Gestures, "j j")));
         let mut connecting = App::new(palette.clone(), font, None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));
