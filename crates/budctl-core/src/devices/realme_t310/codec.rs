@@ -3,7 +3,7 @@
 
 use crate::error::{Error, Result};
 use crate::reader::Reader;
-use crate::status::{Battery, Charge, Gesture, NoiseControl, NoiseMode, Switch};
+use crate::status::{AncLevel, Battery, Charge, Gesture, NoiseControl, NoiseMode, Switch};
 
 /// Spec: realme_t310.md#bitmap
 pub(super) const HANDSHAKE: u16 = 0x0100;
@@ -300,8 +300,10 @@ pub(super) fn noise_write_mask(mode: NoiseMode) -> u32 {
     match mode {
         NoiseMode::Off => 0x01,
         NoiseMode::Transparency => 0x02,
-        // Plain "noise cancelling on" is the deep level.
-        NoiseMode::Anc => 0x08,
+        NoiseMode::Anc(AncLevel::Light) => 0x04,
+        NoiseMode::Anc(AncLevel::Medium) => 0x10,
+        // Also plain "noise cancelling on".
+        NoiseMode::Anc(AncLevel::Deep) => 0x08,
     }
 }
 
@@ -518,7 +520,16 @@ mod tests {
     fn noise_control_write_payloads() {
         assert_eq!(noise_write_payload(NoiseMode::Off), hex("01 01 01"));
         assert_eq!(noise_write_payload(NoiseMode::Transparency), hex("01 01 02"));
-        assert_eq!(noise_write_payload(NoiseMode::Anc), hex("01 01 08"));
+        assert_eq!(noise_write_payload(NoiseMode::Anc(AncLevel::Light)), hex("01 01 04"));
+        assert_eq!(noise_write_payload(NoiseMode::Anc(AncLevel::Medium)), hex("01 01 10"));
+        assert_eq!(noise_write_payload(NoiseMode::Anc(AncLevel::Deep)), hex("01 01 08"));
+        // What is written is what a read reports: every write mask decodes to its own mode.
+        for level in [AncLevel::Light, AncLevel::Medium, AncLevel::Deep] {
+            let mut reply = hex("00 01 01");
+            reply.extend(noise_write_payload(NoiseMode::Anc(level)).iter().skip(2));
+            let read = decode_noise_mode(&reply).unwrap();
+            assert_eq!((read.mode.as_str(), read.level.as_deref()), ("anc", Some(level.name())));
+        }
         // The family's documented frame for "off" (realme_t310.md#frame-whole).
         let frame =
             crate::devices::realme_t310::frame::encode(NOISE_CONTROL_WRITE, 0x06, &noise_write_payload(NoiseMode::Off))

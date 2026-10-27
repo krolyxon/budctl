@@ -45,12 +45,31 @@ pub struct NoiseControl {
     pub level: Option<String>,
 }
 
-/// A noise-control mode to set. Levels come with W2.
+/// A noise-control mode to set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoiseMode {
     Off,
     Transparency,
-    Anc,
+    Anc(AncLevel),
+}
+
+/// How strongly noise cancelling works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AncLevel {
+    Light,
+    Medium,
+    Deep,
+}
+
+impl AncLevel {
+    /// The name [`NoiseControl::level`] uses for it.
+    pub fn name(self) -> &'static str {
+        match self {
+            AncLevel::Light => "light",
+            AncLevel::Medium => "medium",
+            AncLevel::Deep => "deep",
+        }
+    }
 }
 
 impl NoiseMode {
@@ -59,7 +78,7 @@ impl NoiseMode {
         match self {
             NoiseMode::Off => "off",
             NoiseMode::Transparency => "transparency",
-            NoiseMode::Anc => "anc",
+            NoiseMode::Anc(_) => "anc",
         }
     }
 }

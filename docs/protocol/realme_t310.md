@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*). The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), and the light/medium/deep levels (W2, verified *ours-2026-10-27*). The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -375,6 +375,8 @@ Evidence: *vendor*
 - **Reply:** `0x8404 <status>`.
   - Status `0E` means no bud is in an ear (*buds4*). The T310 has no in-ear sensor (*t310*), so it may never send it.
 - **Check:** read `0x010C 01 01` again.
+- **`anc on`.** budctl writes `08` (deep), because no "on at the saved level" value is known, and budctl keeps no device state of its own. The buds do remember the level (*ours-2026-10-27*, W2): after `anc light`, `anc transparency` and a hold gesture, noise cancelling came back as light (`04`). How an app turns noise cancelling on at the saved level is unknown. Writing `08` forces deep, and the saved level cannot be read while noise cancelling is off. Finding out needs an Android HCI snoop of realme Link turning noise cancelling on after a level was chosen ([open questions](#open)).
+- **Levels on the T310** (*ours-2026-10-27*, W2): `01 01 04` (light), `01 01 10` (medium) and `01 01 08` (deep) were each acked with `00` within 15-30 ms and read back on the first try.
 - **On the T310** (*ours-2026-10-27*, W1): payloads `01 01 01`, `01 01 02` and `01 01 08` each got `0x8404 00` within 20-80 ms. The first read-back, about 200 ms later, already showed the new mask. The buds played their own voice prompts ("Normal Mode", "Transparent Mode", "Noise Cancelling"). They sent no event-`03` push for the change, although it was subscribed.
 
 <a id="switch-write"></a>
@@ -468,12 +470,13 @@ Evidence: *vendor*
 2. ~~The real bitmap bytes, the product-id reply and the offered events.~~ Answered at HW1; see [§5](#bitmap-t310) and [§6](#events-offered).
 3. Partly answered at HW1: no `0x0500`, but an unanswered `0x0501` with no reset ([§7](#buds-requests)). `F2`/`F4` were offered but not subscribed, so none arrived. What `0x0501` asks for is unknown.
 4. What "busy" looks like when the phone holds the channel: the connect is refused, the connect succeeds and the buds stay silent, or the buds drop the laptop's link. A local holder gives `EBUSY` (HW1). Until the phone case is tested, budctl also treats a silent handshake as "channel busy" (exit 3).
-5. The width of the noise-control value: one byte so far, on reads and writes. `08` reads back as `08` after writing it (W1), but whether `08` is the deep level or plain "on" is still open (W2).
+5. The width of the noise-control value: one byte so far, on reads and writes. `08` is the deep level: light, medium and deep read back as `04`, `10` and `08` (W2).
 6. ~~Whether the T310 answers id `1A` (wind).~~ It does (HW1). What id `05` means is still open: it reads `00`.
 7. How long after the game-mode ack the new value shows up in `0x010D`.
 8. The shape of the T310 gesture table is answered at HW1: six entries, `<side> <group> <act> <fn>`, double tap, triple tap and hold for each bud. The names of the EQ presets in realme Link are still open.
-10. Why the T310 ignores `0x0124` although bit 38 is set ([§9.7](#bass-read)). Needs a realme Link capture before W6.
 9. Whether the minimum 200 ms spacing between sends is needed.
+10. Why the T310 ignores `0x0124` although bit 38 is set ([§9.7](#bass-read)). Needs a realme Link capture before W6.
+11. How to turn noise cancelling on at the level the buds saved, without forcing deep ([§10.1](#anc-write)). Needs a realme Link snoop.
 
 <a id="roadmap"></a>
 ## 13. Roadmap and hardware checkpoints
@@ -507,6 +510,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W2 `anc light`, `anc medium`, `anc deep`; level memory | pass | Each level acked and read back on the first try. The buds keep the level across a hold-gesture cycle. See [§10.1](#anc-write) |
 | 2026-10-27 | W1 `anc transparency`, `anc off`, `anc on` | pass | Acked, read back on the first try, and the buds' voice prompts matched. See [§10.1](#anc-write) |
 | 2026-10-27 | HW1 `list`, `status`, `--json status`, `touch`, not-connected path, busy path (local holder) | pass, with fixes | See below. Busy with the phone app as the holder is still untested |
 

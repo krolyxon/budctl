@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 use budctl_core::bt::BdAddr;
-use budctl_core::status::NoiseMode;
+use budctl_core::status::{AncLevel, NoiseMode};
 use budctl_core::{Error, Kind};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -51,15 +51,21 @@ enum Command {
 #[derive(Clone, Copy, ValueEnum)]
 enum AncArg {
     Off,
-    On,
     Transparency,
+    /// Noise cancelling at the deep level (the buds use the same value for both).
+    On,
+    Light,
+    Medium,
+    Deep,
 }
 
 impl From<AncArg> for NoiseMode {
     fn from(arg: AncArg) -> Self {
         match arg {
             AncArg::Off => NoiseMode::Off,
-            AncArg::On => NoiseMode::Anc,
+            AncArg::On | AncArg::Deep => NoiseMode::Anc(AncLevel::Deep),
+            AncArg::Light => NoiseMode::Anc(AncLevel::Light),
+            AncArg::Medium => NoiseMode::Anc(AncLevel::Medium),
             AncArg::Transparency => NoiseMode::Transparency,
         }
     }

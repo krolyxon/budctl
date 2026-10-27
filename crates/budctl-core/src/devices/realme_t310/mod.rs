@@ -193,10 +193,16 @@ impl Session for T310Session {
             }
             if Instant::now() >= give_up {
                 let now = codec::decode_noise_mode(&reply)?;
+                let wanted = match mode {
+                    NoiseMode::Anc(level) => format!("anc ({})", level.name()),
+                    _ => mode.name().to_owned(),
+                };
+                let reported = match &now.level {
+                    Some(level) => format!("{} ({level})", now.mode),
+                    None => now.mode,
+                };
                 return Err(Error::NotApplied(format!(
-                    "the buds accepted noise control {}, but still report {}",
-                    mode.name(),
-                    now.mode
+                    "the buds accepted noise control {wanted}, but still report {reported}"
                 )));
             }
             self.link.pump_until(Instant::now() + READ_BACK_PAUSE)?;
@@ -229,7 +235,7 @@ impl Session for T310Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::status::Charge;
+    use crate::status::{AncLevel, Charge};
     use crate::transport::mock::{Script, Step, hex};
 
     fn tx(cmd: u16, seq: u8, payload: &str) -> Step {
@@ -486,11 +492,29 @@ mod tests {
     }
 
     #[test]
+    fn sets_a_noise_cancelling_level() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0404, 0x05, "01 01 04"),
+            rx(0x8404, 0x05, "00"),
+            tx(0x010C, 0x06, "01 01"),
+            rx(0x810C, 0x06, "00 01 01 04"),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script)
+            .unwrap()
+            .set_noise_control(NoiseMode::Anc(AncLevel::Light))
+            .unwrap();
+        script.assert_done();
+        assert_eq!((now.mode.as_str(), now.level.as_deref()), ("anc", Some("light")));
+    }
+
+    #[test]
     fn a_rejected_noise_control_change_is_not_read_back() {
         let mut steps = handshake();
         steps.extend([tx(0x0404, 0x05, "01 01 08"), rx(0x8404, 0x05, "0E")]);
         let script = Script::new(steps);
-        let result = open(&script).unwrap().set_noise_control(NoiseMode::Anc);
+        let result = open(&script).unwrap().set_noise_control(NoiseMode::Anc(AncLevel::Deep));
         script.assert_done();
         assert!(matches!(result, Err(Error::Rejected { status: 0x0E, .. })));
     }
