@@ -4,7 +4,8 @@
 //! own, and the window shows what they report. The mouse comes first; vim-like keys work on top
 //! (`keys.rs`). `--demo` shows made-up buds instead.
 
-mod demo;
+mod buds;
+mod equalizer;
 mod icons;
 mod keys;
 mod overview;
@@ -20,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use budctl_core::Kind;
 use budctl_core::bt::BdAddr;
-use budctl_core::status::{AncLevel, EqPresets, NoiseControl, NoiseMode, Switch};
+use budctl_core::status::{AncLevel, EqBand, NoiseControl, NoiseMode, Switch};
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::operation::{self, RelativeOffset};
 use iced::widget::{Column, column, container, mouse_area, opaque, row, scrollable, space, stack, text};
@@ -176,6 +177,26 @@ enum Item {
     Switch(&'static str),
     /// A row that opens a page.
     Open(Page),
+    /// An EQ preset, by its id.
+    Preset(u8),
+    /// One band of a custom EQ preset: the preset's id and the band's frequency.
+    Band(u8, u16),
+}
+
+/// What a page needs besides the buds: the item under the keyboard cursor, if it shows, and the
+/// items with a write on its way.
+#[derive(Clone, Copy)]
+struct Marks<'a> {
+    focus: Option<Item>,
+    pending: &'a [Item],
+}
+
+/// Bands of a custom EQ preset moved on the screen and not saved on the buds yet.
+#[derive(Debug, Clone, PartialEq)]
+struct Draft {
+    preset: u8,
+    /// All the preset's bands, as shown.
+    bands: Vec<EqBand>,
 }
 
 /// Where the connection to the buds stands.
@@ -197,6 +218,18 @@ enum Message {
     Noise(NoiseMode),
     /// A switch's key, and whether to turn it on.
     Switch(&'static str, bool),
+    /// Select an EQ preset, by its id.
+    Preset(u8),
+    /// Move a band of a custom EQ preset. With `save`, save the preset right away, else when
+    /// [`Message::SaveBands`] comes (the mouse lets go of the slider).
+    Band {
+        preset: u8,
+        hz: u16,
+        gain: i8,
+        save: bool,
+    },
+    /// Save the moved bands of a custom EQ preset.
+    SaveBands(u8),
     /// Read the buds again.
     Refresh,
     Worker(Event),
@@ -210,7 +243,7 @@ enum Message {
 
 struct App {
     page: Page,
-    buds: demo::Buds,
+    buds: buds::Buds,
     /// The level "Noise cancelling" turns on at: the one last reported or picked.
     anc_level: AncLevel,
     look: Look,
@@ -233,11 +266,13 @@ struct App {
     in_flight: VecDeque<Option<Item>>,
     /// When the buds were last read.
     read_at: Option<Instant>,
+    /// Bands moved and not saved yet.
+    draft: Option<Draft>,
 }
 
 impl App {
     fn new(theme_file: Option<PathBuf>, font: Font, device: Option<BdAddr>, demo: bool) -> Self {
-        let buds = if demo { demo::buds() } else { demo::unknown() };
+        let buds = if demo { buds::demo() } else { buds::unknown() };
         let anc_level = buds
             .status
             .noise_control
@@ -264,6 +299,7 @@ impl App {
             worker: None,
             in_flight: VecDeque::new(),
             read_at: None,
+            draft: None,
         };
         app.refresh_palette();
         app
@@ -274,6 +310,14 @@ impl App {
             Message::Open(page) => return self.open(page),
             Message::Noise(mode) => self.write(Item::NoiseMode, Command::Noise(mode)),
             Message::Switch(key, on) => self.write(Item::Switch(key), Command::Switch(key, on)),
+            Message::Preset(id) => self.select(id),
+            Message::Band { preset, hz, gain, save } => {
+                self.move_band(preset, hz, gain);
+                if save {
+                    self.save_bands(preset);
+                }
+            }
+            Message::SaveBands(preset) => self.save_bands(preset),
             Message::Refresh => self.refresh(),
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
@@ -307,6 +351,19 @@ impl App {
                         self.apply_switch(switch);
                     }
                 }
+                Command::Eq(preset) => self.buds.set_eq(preset),
+                Command::CustomEq(_, bands) => {
+                    if let Some(preset) = self.buds.preset(item_preset(item)) {
+                        let mut preset = preset.clone();
+                        for band in &bands {
+                            if let Some(shown) = preset.bands.iter_mut().find(|b| b.hz == band.hz) {
+                                shown.gain = band.gain;
+                            }
+                        }
+                        self.buds.set_custom(preset);
+                    }
+                    self.draft = None;
+                }
                 Command::Read => {}
             }
         } else if !self.pending().contains(&item) {
@@ -317,7 +374,10 @@ impl App {
     /// Reads the buds again; with the made-up buds, starts them over.
     fn refresh(&mut self) {
         match self.link {
-            Link::Demo => self.buds = demo::buds(),
+            Link::Demo => {
+                self.buds = buds::demo();
+                self.draft = None;
+            }
             _ if self.in_flight.contains(&None) => {}
             _ => {
                 if self.read_at.is_none() {
@@ -366,8 +426,35 @@ impl App {
                 self.apply_switch(switch);
                 self.link = Link::Live;
             }
-            Event::Failed { kind, message } => {
+            Event::Eq(now) => {
                 self.in_flight.pop_front();
+                self.buds.set_eq(now);
+                self.link = Link::Live;
+            }
+            Event::CustomEq(preset) => {
+                self.in_flight.pop_front();
+                let id = preset.id;
+                self.buds.set_custom(preset);
+                self.link = Link::Live;
+                // Bands moved while this write was on its way go out now.
+                match &self.draft {
+                    Some(draft) if draft.preset == id => {
+                        if self.buds.preset(id).is_some_and(|saved| saved.bands == draft.bands) {
+                            self.draft = None;
+                        } else {
+                            self.save_bands(id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Event::Failed { kind, message } => {
+                if let Some(Some(Item::Preset(id))) = self.in_flight.pop_front() {
+                    // The buds keep what they had: show that, not the moved bands.
+                    if self.draft.as_ref().is_some_and(|draft| draft.preset == id) {
+                        self.draft = None;
+                    }
+                }
                 if kind == Kind::NotFound {
                     self.buds.connected = false;
                 }
@@ -377,7 +464,7 @@ impl App {
     }
 
     fn apply_reading(&mut self, reading: Reading) {
-        self.buds.eq_name = eq_name(reading.status.eq.as_deref(), reading.eq.as_ref());
+        self.buds.eq = reading.eq;
         if let Some(level) = reading
             .status
             .noise_control
@@ -403,6 +490,49 @@ impl App {
     fn apply_switch(&mut self, switch: Switch) {
         if let Some(shown) = self.buds.status.switches.iter_mut().find(|s| s.key == switch.key) {
             *shown = switch;
+        }
+    }
+
+    /// Selects an EQ preset: a built-in one by name, a custom one by saving it unchanged.
+    fn select(&mut self, id: u8) {
+        let Some(preset) = self.buds.preset(id) else {
+            return;
+        };
+        let command = if preset.custom {
+            Command::CustomEq(buds::key(preset), Vec::new())
+        } else {
+            Command::Eq(preset.name.clone())
+        };
+        self.write(Item::Preset(id), command);
+    }
+
+    /// Moves a band on the screen, within the preset's range. Nothing goes to the buds yet.
+    fn move_band(&mut self, id: u8, hz: u16, gain: i8) {
+        let Some(preset) = self.buds.preset(id) else {
+            return;
+        };
+        let (low, high) = preset.range.unwrap_or((i8::MIN, i8::MAX));
+        let mut bands = match self.draft.take() {
+            Some(draft) if draft.preset == id => draft.bands,
+            _ => preset.bands.clone(),
+        };
+        if let Some(band) = bands.iter_mut().find(|band| band.hz == hz) {
+            band.gain = gain.clamp(low, high);
+        }
+        self.draft = Some(Draft { preset: id, bands });
+    }
+
+    /// Saves the moved bands of a custom preset. If a write to it is on its way, they go out
+    /// when it is answered: the latest bands win.
+    fn save_bands(&mut self, id: u8) {
+        let Some(draft) = self.draft.clone().filter(|draft| draft.preset == id) else {
+            return;
+        };
+        let Some(preset) = self.buds.preset(id) else {
+            return;
+        };
+        if !self.pending().contains(&Item::Preset(id)) {
+            self.write(Item::Preset(id), Command::CustomEq(buds::key(preset), draft.bands));
         }
     }
 
@@ -461,6 +591,7 @@ impl App {
     fn items(&self) -> Vec<Item> {
         match self.page {
             Page::Overview if self.has_reading() => overview::items(&self.buds),
+            Page::Equalizer if self.has_reading() => equalizer::items(&self.buds),
             _ => Vec::new(),
         }
     }
@@ -528,6 +659,32 @@ impl App {
                 (want != on).then_some(Message::Switch(key, want))
             }
             Item::Open(page) => (action != Action::Left).then_some(Message::Open(page)),
+            Item::Preset(id) => {
+                let chosen = self.buds.status.eq.as_deref() == self.buds.preset(id).map(buds::key).as_deref();
+                (action != Action::Left && !chosen).then_some(Message::Preset(id))
+            }
+            Item::Band(id, hz) => {
+                let preset = self.buds.preset(id)?;
+                let gain = match &self.draft {
+                    Some(draft) if draft.preset == id => &draft.bands,
+                    _ => &preset.bands,
+                }
+                .iter()
+                .find(|band| band.hz == hz)?
+                .gain;
+                let (low, high) = preset.range.unwrap_or((i8::MIN, i8::MAX));
+                let to = match action {
+                    Action::Left => gain.checked_sub(1)?.max(low),
+                    Action::Right => gain.checked_add(1)?.min(high),
+                    _ => return None,
+                };
+                (to != gain).then_some(Message::Band {
+                    preset: id,
+                    hz,
+                    gain: to,
+                    save: true,
+                })
+            }
         }
     }
 
@@ -580,13 +737,20 @@ impl App {
         let pending = self.pending();
         let page = match self.page {
             Page::Overview if self.has_reading() => {
-                let marks = overview::Marks {
+                let marks = Marks {
                     focus: self.focus(),
                     pending: &pending,
                 };
                 overview::view(look, &self.buds, self.anc_level, marks)
             }
             Page::Overview => self.connecting(),
+            Page::Equalizer if self.has_reading() => {
+                let marks = Marks {
+                    focus: self.focus(),
+                    pending: &pending,
+                };
+                equalizer::view(look, &self.buds, self.draft.as_ref(), marks)
+            }
             page => column![
                 ui::title(look, page.title()),
                 text("This page comes in a later step.").size(14).color(look.p.dim)
@@ -780,31 +944,17 @@ fn anc_level(name: &str) -> Option<AncLevel> {
         .find(|level| level.name() == name)
 }
 
-/// The name to show for the EQ preset in use: a custom preset's own name (`custom-4` →
-/// "Custom1"), else the preset's name in words (`pure-bass` → "Pure bass").
-fn eq_name(current: Option<&str>, presets: Option<&EqPresets>) -> String {
-    let Some(current) = current else {
-        return "Unknown".to_owned();
-    };
-    let custom = current
-        .strip_prefix("custom-")
-        .and_then(|id| id.parse::<u8>().ok())
-        .and_then(|id| presets?.presets.iter().find(|p| p.custom && p.id == id))
-        .map(|preset| preset.name.clone());
-    custom.unwrap_or_else(|| {
-        let words = current.replace('-', " ");
-        let mut letters = words.chars();
-        letters
-            .next()
-            .map(|first| first.to_uppercase().chain(letters).collect())
-            .unwrap_or_default()
-    })
+/// The preset a write to `item` is for.
+fn item_preset(item: Item) -> u8 {
+    match item {
+        Item::Preset(id) | Item::Band(id, _) => id,
+        _ => 0,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use budctl_core::status::EqPreset;
     use iced::keyboard::key::Named;
     use std::fs;
     use std::path::Path;
@@ -825,8 +975,8 @@ mod tests {
 
     fn reading() -> Reading {
         Reading {
-            status: demo::buds().status,
-            eq: None,
+            status: buds::demo().status,
+            eq: buds::demo().eq,
         }
     }
 
@@ -1093,21 +1243,57 @@ mod tests {
     }
 
     #[test]
-    fn eq_names() {
-        let presets = EqPresets {
-            current: Some("custom-4".to_owned()),
-            presets: vec![EqPreset {
-                name: "Custom1".to_owned(),
-                id: 4,
-                custom: true,
-                bands: Vec::new(),
-            }],
-            warnings: Vec::new(),
-        };
-        assert_eq!(eq_name(Some("custom-4"), Some(&presets)), "Custom1");
-        assert_eq!(eq_name(Some("custom-4"), None), "Custom 4");
-        assert_eq!(eq_name(Some("pure-bass"), Some(&presets)), "Pure bass");
-        assert_eq!(eq_name(None, None), "Unknown");
+    fn presets_and_bands_by_key() {
+        let mut app = app();
+        press(&mut app, "J");
+        assert_eq!(app.page, Page::Equalizer);
+        press(&mut app, "j l");
+        assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
+        assert_eq!(app.buds.eq_name(), "Pure raw");
+        press(&mut app, "G");
+        assert_eq!(app.focus(), Some(Item::Band(4, 16000)));
+        // Moving a band saves the custom preset, which also selects it.
+        press(&mut app, "l");
+        assert_eq!(app.buds.status.eq.as_deref(), Some("custom-4"));
+        let last = |app: &App| app.buds.preset(4).unwrap().bands.last().unwrap().gain;
+        assert_eq!(last(&app), 3);
+        press(&mut app, "l l l l l");
+        assert_eq!(last(&app), 6, "it stops at the top of the range");
+    }
+
+    #[test]
+    fn band_moves_wait_for_the_write_before_them() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        press(&mut app, "J G G l");
+        let gain = |bands: &[EqBand]| bands.last().map(|band| band.gain);
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::CustomEq(name, bands)) if name == "custom-4" && gain(&bands) == Some(3)
+        ));
+        // While that write is on its way, moves only change the screen.
+        press(&mut app, "l l");
+        assert!(commands.try_recv().is_err());
+        assert_eq!(app.draft.as_ref().and_then(|draft| gain(&draft.bands)), Some(5));
+        // The answer comes: the latest bands go out at once.
+        let mut saved = buds::demo().preset(4).unwrap().clone();
+        if let Some(band) = saved.bands.last_mut() {
+            band.gain = 3;
+        }
+        let _ = app.update(Message::Worker(Event::CustomEq(saved.clone())));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::CustomEq(_, bands)) if gain(&bands) == Some(5)
+        ));
+        assert_eq!(app.pending(), [Item::Preset(4)]);
+        // A failure drops the moves: the screen shows what the buds kept.
+        let _ = app.update(Message::Worker(Event::Failed {
+            kind: Kind::Failed,
+            message: "no reply".to_owned(),
+        }));
+        assert_eq!(app.draft, None);
+        assert_eq!(gain(&app.buds.preset(4).unwrap().bands), Some(3));
     }
 
     #[test]
@@ -1161,6 +1347,7 @@ mod tests {
         shots.push(("overview-full".to_owned(), 1240.0, on(Page::Overview, "")));
         shots.push(("overview-cursor".to_owned(), 800.0, on(Page::Overview, "j j j j")));
         shots.push(("keys".to_owned(), 800.0, on(Page::Overview, "?")));
+        shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k")));
         let mut connecting = App::new(palette.clone(), font, None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));

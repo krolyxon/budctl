@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use budctl_core::bt::BdAddr;
 use budctl_core::devices::Session;
-use budctl_core::status::{EqPresets, NoiseControl, NoiseMode, Status, Switch};
+use budctl_core::status::{EqBand, EqPreset, EqPresets, NoiseControl, NoiseMode, Status, Switch};
 use budctl_core::{Error, Kind, Result};
 use iced::futures::channel::mpsc as channel;
 use iced::futures::{SinkExt, Stream, StreamExt};
@@ -29,6 +29,11 @@ pub enum Command {
     Noise(NoiseMode),
     /// A switch's key, and whether to turn it on.
     Switch(&'static str, bool),
+    /// Select a built-in EQ preset, by name.
+    Eq(String),
+    /// Save a custom EQ preset (`custom-<id>`) with these bands changed, which also selects it.
+    /// With no bands, it only selects it.
+    CustomEq(String, Vec<EqBand>),
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +48,10 @@ pub enum Event {
     Noise(NoiseControl),
     /// The answer to [`Command::Switch`]: the switch, as read back.
     Switch(Switch),
+    /// The answer to [`Command::Eq`]: the preset now in use.
+    Eq(String),
+    /// The answer to [`Command::CustomEq`]: the preset, as read back.
+    CustomEq(EqPreset),
     /// The answer to a command that failed. The session is closed; the next command opens a
     /// new one.
     Failed { kind: Kind, message: String },
@@ -144,6 +153,14 @@ impl Worker {
                 .session()
                 .and_then(|session| session.set_switch(key, on))
                 .map(Event::Switch),
+            Command::Eq(preset) => self
+                .session()
+                .and_then(|session| session.set_eq(&preset))
+                .map(Event::Eq),
+            Command::CustomEq(preset, bands) => self
+                .session()
+                .and_then(|session| session.set_custom_eq(&preset, &bands))
+                .map(Event::CustomEq),
         };
         match answer {
             Ok(event) => self.send(event),

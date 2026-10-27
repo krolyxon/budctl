@@ -482,6 +482,7 @@ pub(super) fn builtin_eqs() -> Vec<EqPreset> {
             id,
             custom: false,
             bands: Vec::new(),
+            range: None,
         })
         .collect()
 }
@@ -506,6 +507,7 @@ impl CustomEq {
             id: self.id,
             custom: true,
             bands: self.bands.clone(),
+            range: Some((self.min, self.max)),
         }
     }
 }
@@ -1044,6 +1046,7 @@ mod tests {
                 id: 0x04,
                 custom: true,
                 bands: vec![EqBand { hz: 62, gain: 3 }, EqBand { hz: 16000, gain: -2 }],
+                range: Some((-6, 6)),
             }]
         );
         // Cut short inside the bands.

@@ -4,11 +4,11 @@ use budctl_core::status::{AncLevel, Charge, NoiseMode, Switch};
 use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Length};
 
-use crate::demo::Buds;
+use crate::buds::Buds;
 use crate::icons::{self, Icon, Part, RingColors};
 use crate::theme::Look;
 use crate::ui::{self, Segment};
-use crate::{Item, Message, Page};
+use crate::{Item, Marks, Message, Page};
 
 /// What the keyboard cursor can rest on, top to bottom, as [`view`] shows them.
 pub fn items(buds: &Buds) -> Vec<Item> {
@@ -22,14 +22,6 @@ pub fn items(buds: &Buds) -> Vec<Item> {
     items.extend(shown(&buds.status.switches).into_iter().map(|s| Item::Switch(s.key)));
     items.extend(MORE.map(|(page, _, _)| Item::Open(page)));
     items
-}
-
-/// What the page needs besides the buds: the item under the keyboard cursor, if it shows, and the
-/// items with a write on its way.
-#[derive(Clone, Copy)]
-pub struct Marks<'a> {
-    pub focus: Option<Item>,
-    pub pending: &'a [Item],
 }
 
 /// Shown instead of an item's subtitle while a write to it is on its way.
@@ -193,7 +185,7 @@ fn more<'a>(look: Look, buds: &Buds, focus: Option<Item>) -> Element<'a, Message
         .into_iter()
         .map(|(page, icon, title)| {
             let subtitle = match page {
-                Page::Equalizer => buds.eq_name.clone(),
+                Page::Equalizer => buds.eq_name(),
                 Page::Gestures => "Taps and holds on each bud".to_owned(),
                 _ => "Find my earbuds, firmware".to_owned(),
             };

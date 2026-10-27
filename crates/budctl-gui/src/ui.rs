@@ -73,7 +73,7 @@ fn separator<'a>(look: Look) -> Element<'a, Message> {
 pub fn setting<'a>(
     look: Look,
     icon: Icon,
-    title: &'a str,
+    title: impl text::IntoFragment<'a>,
     subtitle: Option<String>,
     trailing: Element<'a, Message>,
     on_press: Message,

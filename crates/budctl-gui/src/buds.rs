@@ -1,0 +1,190 @@
+//! The buds the window shows: made-up ones for `--demo` (roughly what the owner's T310 reported
+//! at the last checkpoints), or an empty pair until the real buds answer.
+
+use budctl_core::status::{Battery, Charge, EqBand, EqPreset, EqPresets, NoiseControl, Status, Switch};
+
+/// The buds the window shows.
+pub struct Buds {
+    pub name: String,
+    pub connected: bool,
+    pub status: Status,
+    /// The EQ presets, when the buds list them.
+    pub eq: Option<EqPresets>,
+}
+
+impl Buds {
+    /// The name to show for the EQ preset in use.
+    pub fn eq_name(&self) -> String {
+        eq_name(self.status.eq.as_deref(), self.eq.as_ref())
+    }
+
+    /// Records that `now` is the EQ preset in use.
+    pub fn set_eq(&mut self, now: String) {
+        if let Some(eq) = &mut self.eq {
+            eq.current = Some(now.clone());
+        }
+        self.status.eq = Some(now);
+    }
+
+    /// Takes in a custom preset as the buds report it after a write: saved, and in use.
+    pub fn set_custom(&mut self, preset: EqPreset) {
+        let now = key(&preset);
+        if let Some(shown) = self
+            .eq
+            .as_mut()
+            .and_then(|eq| eq.presets.iter_mut().find(|p| p.custom && p.id == preset.id))
+        {
+            *shown = preset;
+        }
+        self.set_eq(now);
+    }
+
+    /// The preset with this id.
+    pub fn preset(&self, id: u8) -> Option<&EqPreset> {
+        self.eq.as_ref()?.presets.iter().find(|p| p.id == id)
+    }
+}
+
+/// The made-up buds of `--demo`.
+pub fn demo() -> Buds {
+    let charge = |level| Some(Charge { level, charging: false });
+    let switch = |key, label, on| Switch { key, label, on };
+    let builtin = |id, name: &str| EqPreset {
+        name: name.to_owned(),
+        id,
+        custom: false,
+        bands: Vec::new(),
+        range: None,
+    };
+    let band = |hz, gain| EqBand { hz, gain };
+    Buds {
+        name: "realme Buds T310".to_owned(),
+        connected: true,
+        status: Status {
+            battery: Battery {
+                left: charge(80),
+                right: charge(80),
+                case: None,
+            },
+            noise_control: Some(NoiseControl {
+                mode: "anc".to_owned(),
+                level: Some("deep".to_owned()),
+            }),
+            eq: Some("custom-4".to_owned()),
+            bass_level: None,
+            switches: vec![
+                switch("game", "Game mode", false),
+                switch("dual", "Dual connection", true),
+                switch("wind", "Wind-noise reduction", true),
+                switch("spatial", "3D sound", true),
+                switch("bass-boost", "Bass boost", true),
+            ],
+            codec: Some("SBC".to_owned()),
+            firmware: Some("1.1.0.43".to_owned()),
+            warnings: Vec::new(),
+        },
+        eq: Some(EqPresets {
+            current: Some("custom-4".to_owned()),
+            presets: vec![
+                builtin(0, "pure-raw"),
+                builtin(1, "deep-bass"),
+                builtin(2, "pure-vocals"),
+                builtin(3, "pure-bass"),
+                EqPreset {
+                    name: "Custom1".to_owned(),
+                    id: 4,
+                    custom: true,
+                    bands: vec![
+                        band(50, 3),
+                        band(250, 1),
+                        band(1000, 0),
+                        band(4000, -1),
+                        band(8000, 1),
+                        band(16000, 2),
+                    ],
+                    range: Some((-6, 6)),
+                },
+            ],
+            warnings: Vec::new(),
+        }),
+    }
+}
+
+/// What the window shows before the real buds answer.
+pub fn unknown() -> Buds {
+    Buds {
+        name: "Your buds".to_owned(),
+        connected: false,
+        status: Status::default(),
+        eq: None,
+    }
+}
+
+/// The name a preset is selected by, as in [`Status::eq`]: a built-in one's own name,
+/// `custom-<id>` for a custom one.
+pub fn key(preset: &EqPreset) -> String {
+    if preset.custom {
+        format!("custom-{}", preset.id)
+    } else {
+        preset.name.clone()
+    }
+}
+
+/// A preset's name to show: a custom one's stored name, a built-in one's in words.
+pub fn shown_name(preset: &EqPreset) -> String {
+    if preset.custom {
+        preset.name.clone()
+    } else {
+        words(&preset.name)
+    }
+}
+
+/// The name to show for the EQ preset in use: a custom preset's own name (`custom-4` →
+/// "Custom1"), else the preset's name in words (`pure-bass` → "Pure bass").
+pub fn eq_name(current: Option<&str>, presets: Option<&EqPresets>) -> String {
+    let Some(current) = current else {
+        return "Unknown".to_owned();
+    };
+    presets
+        .and_then(|eq| eq.presets.iter().find(|p| key(p) == current))
+        .map_or_else(|| words(current), shown_name)
+}
+
+/// `pure-bass` → "Pure bass".
+fn words(name: &str) -> String {
+    let words = name.replace('-', " ");
+    let mut letters = words.chars();
+    letters
+        .next()
+        .map(|first| first.to_uppercase().chain(letters).collect())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eq_names() {
+        let buds = demo();
+        assert_eq!(eq_name(Some("custom-4"), buds.eq.as_ref()), "Custom1");
+        assert_eq!(eq_name(Some("custom-4"), None), "Custom 4");
+        assert_eq!(eq_name(Some("pure-bass"), buds.eq.as_ref()), "Pure bass");
+        assert_eq!(eq_name(None, None), "Unknown");
+        assert_eq!(buds.eq_name(), "Custom1");
+    }
+
+    #[test]
+    fn eq_changes_show() {
+        let mut buds = demo();
+        buds.set_eq("deep-bass".to_owned());
+        assert_eq!(buds.eq_name(), "Deep bass");
+        assert_eq!(buds.eq.as_ref().unwrap().current.as_deref(), Some("deep-bass"));
+
+        let mut custom = buds.preset(4).unwrap().clone();
+        custom.bands[0].gain = -6;
+        buds.set_custom(custom);
+        assert_eq!(buds.status.eq.as_deref(), Some("custom-4"));
+        assert_eq!(buds.preset(4).unwrap().bands[0].gain, -6);
+    }
+}

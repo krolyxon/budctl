@@ -23,6 +23,7 @@ pub enum Icon {
     Dual,
     Chevron,
     Bolt,
+    Check,
 }
 
 /// `icon` at `size` pixels, in `color`.
@@ -239,6 +240,7 @@ fn draw_icon(pen: &mut Pen, icon: Icon) {
             pen.rect(17.5, 8.0, 4.5, 11.0, 1.2);
         }
         Icon::Chevron => pen.polyline(&[(9.0, 5.5), (15.5, 12.0), (9.0, 18.5)], false),
+        Icon::Check => pen.polyline(&[(4.5, 12.5), (9.5, 17.5), (19.5, 7.0)], false),
     }
 }
 

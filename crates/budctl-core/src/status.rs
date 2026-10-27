@@ -133,6 +133,9 @@ pub struct EqPreset {
     pub custom: bool,
     /// Custom presets only: gain per band. Empty for built-in presets.
     pub bands: Vec<EqBand>,
+    /// Custom presets only: the lowest and the highest gain a band takes, dB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<(i8, i8)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
