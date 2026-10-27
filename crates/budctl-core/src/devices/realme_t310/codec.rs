@@ -3,7 +3,7 @@
 
 use crate::error::{Error, Result};
 use crate::reader::Reader;
-use crate::status::{AncLevel, Battery, BudFit, Charge, Gesture, NoiseControl, NoiseMode, Switch};
+use crate::status::{AncLevel, Battery, Charge, Gesture, NoiseControl, NoiseMode, Switch};
 
 /// Spec: realme_t310.md#bitmap
 pub(super) const HANDSHAKE: u16 = 0x0100;
@@ -47,43 +47,6 @@ pub(super) const EVENTS_OFFERED: u16 = 0x0200;
 pub(super) const SUBSCRIBE: u16 = 0x0205;
 /// Spec: realme_t310.md#fit-test
 pub(super) const FIT_TEST: u16 = 0x0405;
-/// Spec: realme_t310.md#pushes
-pub(super) const EVENT_PUSH: u16 = 0x0204;
-/// The event code of a fit-test result. Spec: realme_t310.md#pushes
-pub(super) const FIT_EVENT: u8 = 0x04;
-
-/// Fit-test results by value. Spec: realme_t310.md#fit-test
-const FIT_RESULTS: [(u8, &str); 3] = [(0x01, "good"), (0x00, "average"), (0x06, "poor")];
-
-/// `01` starts the fit test, `00` stops it. Spec: realme_t310.md#fit-test
-pub(super) fn fit_test_payload(start: bool) -> [u8; 1] {
-    [u8::from(start)]
-}
-
-/// Whether a frame is the fit-test result push. Spec: realme_t310.md#pushes
-pub(super) fn is_fit_push(cmd: u16, payload: &[u8]) -> bool {
-    cmd == EVENT_PUSH && payload.first() == Some(&FIT_EVENT)
-}
-
-/// `04 (<dev> <result>)…`, with no count. Spec: realme_t310.md#pushes, #fit-test
-pub(super) fn decode_fit_push(payload: &[u8]) -> Result<Vec<BudFit>> {
-    let mut r = Reader::new(payload, "the fit-test result");
-    if r.u8()? != FIT_EVENT {
-        return Err(Error::Protocol("the push is not a fit-test result".to_owned()));
-    }
-    let mut buds = Vec::new();
-    while !r.is_empty() {
-        let [side, result] = [r.u8()?, r.u8()?];
-        buds.push(BudFit {
-            side: name_of(&SIDES, side).map_or_else(|| format!("device-0x{side:02X}"), str::to_owned),
-            fit: name_of(&FIT_RESULTS, result).map_or_else(|| format!("unknown (0x{result:02X})"), str::to_owned),
-        });
-    }
-    if buds.is_empty() {
-        return Err(Error::Protocol("the fit-test result names no bud".to_owned()));
-    }
-    Ok(buds)
-}
 
 /// Spec: realme_t310.md#identity
 pub(super) const T310_PRODUCT_ID: u32 = 0x06_3C_12;
@@ -938,25 +901,5 @@ mod tests {
             crate::devices::realme_t310::frame::encode(NOISE_CONTROL_WRITE, 0x06, &hold_cycle_write_payload(0x0B))
                 .unwrap();
         assert_eq!(crate::debug::hex(&frame), "AA 0A 00 00 04 04 06 03 00 02 01 0B");
-    }
-
-    #[test]
-    fn fit_test_results() {
-        assert_eq!(fit_test_payload(true), [0x01]);
-        assert_eq!(fit_test_payload(false), [0x00]);
-        assert!(is_fit_push(0x0204, &hex("04 01 01 02 06")));
-        assert!(!is_fit_push(0x0204, &hex("01 03 01 64")));
-        assert!(!is_fit_push(0x8405, &hex("04")));
-        let buds = decode_fit_push(&hex("04 01 01 02 06")).unwrap();
-        let rows: Vec<(&str, &str)> = buds.iter().map(|b| (b.side.as_str(), b.fit.as_str())).collect();
-        assert_eq!(rows, [("left", "good"), ("right", "poor")]);
-        let odd = decode_fit_push(&hex("04 02 00 01 07")).unwrap();
-        let rows: Vec<(&str, &str)> = odd.iter().map(|b| (b.side.as_str(), b.fit.as_str())).collect();
-        assert_eq!(rows, [("right", "average"), ("left", "unknown (0x07)")]);
-        assert!(decode_fit_push(&hex("04")).is_err());
-        assert!(decode_fit_push(&hex("04 01")).is_err());
-        // The frames the spec gives (realme_t310.md#fit-test).
-        let start = crate::devices::realme_t310::frame::encode(FIT_TEST, 0x05, &fit_test_payload(true)).unwrap();
-        assert_eq!(crate::debug::hex(&start), "AA 08 00 00 05 04 05 01 00 01");
     }
 }
