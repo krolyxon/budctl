@@ -2347,6 +2347,48 @@ mod tests {
         let _ = saving.update(Message::Switch("spatial", false));
         let _ = saving.update(Message::Noise(NoiseMode::Off));
         shots.push(("saving".to_owned(), 1240.0, saving));
+        render(&dir, font, shots);
+    }
+
+    /// The README's screenshots: the demo buds in the built-in palette, written to
+    /// `docs/screenshots/` by `cargo test -p budctl-gui readme_screenshots -- --ignored`.
+    #[test]
+    #[ignore = "writes into docs/; run it when the look changes"]
+    fn readme_screenshots() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let scratch = root.join("target/readme-screenshots");
+        let _ = fs::remove_dir_all(&scratch);
+        let font = theme::system_font();
+        let on = |page: Page, keys: &str| {
+            let mut app = App::new(None, font, None, true);
+            app.page = page;
+            press(&mut app, keys);
+            app
+        };
+        let mut equalizer = on(Page::Equalizer, "");
+        let _ = equalizer.update(Message::EditPreset(4));
+        let shots = vec![
+            ("overview".to_owned(), 1140.0, on(Page::Overview, "")),
+            ("equalizer".to_owned(), 900.0, equalizer),
+            ("gestures".to_owned(), 840.0, on(Page::Gestures, "")),
+            ("earbuds".to_owned(), 800.0, on(Page::Earbuds, "")),
+            ("keys".to_owned(), 800.0, on(Page::Overview, "?")),
+        ];
+        let names: Vec<String> = shots.iter().map(|(name, _, _)| name.clone()).collect();
+        render(&scratch, font, shots);
+        let out = root.join("docs/screenshots");
+        fs::create_dir_all(&out).unwrap();
+        for name in names {
+            fs::rename(
+                scratch.join(format!("{name}-tiny-skia.png")),
+                out.join(format!("{name}.png")),
+            )
+            .unwrap();
+        }
+    }
+
+    /// Renders each (name, window height, app) 1040 px wide, to `<dir>/<name>-tiny-skia.png`.
+    fn render(dir: &Path, font: Font, shots: Vec<(String, f32, App)>) {
         for (name, height, app) in shots {
             let settings = iced::Settings {
                 default_font: font,

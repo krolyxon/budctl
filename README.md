@@ -9,6 +9,10 @@ touch controls, battery and more. There is a command-line tool, `budctl`, and a 
 
 **Supported buds:** realme Buds T310. More are added as the author gets them.
 
+<p align="center">
+  <img src="docs/screenshots/overview.png" width="560" alt="budctl-gui's Overview page: battery of each bud, noise control, and switches such as game mode and 3D sound">
+</p>
+
 ## Install
 
 You need Rust 1.88 or newer, BlueZ, and for the desktop app a Wayland desktop.
@@ -31,6 +35,9 @@ budctl anc light|medium|deep               # noise cancelling, at this strength
 budctl eq                                  # the EQ presets, and the one in use
 budctl eq deep-bass                        # select a preset
 budctl eq custom-4 50=+3 16000=-2          # change bands of a custom preset (dB)
+budctl eq new Gym                          # create a custom preset: flat, and put to use
+budctl eq rename custom-4 "Gym mix"        # rename a custom preset
+budctl eq delete custom-4                  # delete a custom preset
 budctl game on|off                         # game mode (low latency)
 budctl set bass-boost|spatial|wind|dual on|off
 budctl dual                                # the phones and computers dual connection keeps
@@ -60,11 +67,24 @@ Exit codes:
 
 `budctl-gui` has five pages:
 
-- **Overview:** battery, noise control, the switches.
-- **Equalizer:** presets, the bands of your custom presets, the bass level.
+- **Overview:** battery, noise control and its strength, the switches, the bass level.
+- **Equalizer:** the presets; create, rename and delete your own, and change their bands.
 - **Gestures:** what each tap and hold does on each bud, and what a hold steps through.
 - **Earbud settings:** dual connection and the devices it keeps, find my earbuds, firmware, audio codec.
-- **App settings.**
+- **App settings:** where the colors come from, the keys, the version.
+
+<table>
+  <tr>
+    <td valign="top"><img src="docs/screenshots/equalizer.png" alt="Equalizer: the built-in presets, a custom preset with its pencil and bin, and its six bands open below"></td>
+    <td valign="top"><img src="docs/screenshots/gestures.png" alt="Gestures: double tap, triple tap and hold for each bud, and the modes a hold steps through"></td>
+  </tr>
+  <tr>
+    <td valign="top"><img src="docs/screenshots/earbuds.png" alt="Earbud settings: the dual connection switch, the devices the buds keep, find my earbuds, firmware and codec"></td>
+    <td valign="top"><img src="docs/screenshots/keys.png" alt="The keys overlay, shown with ?"></td>
+  </tr>
+</table>
+
+The screenshots show `--demo`'s made-up buds.
 
 The app connects when it needs to, and frees the buds' control channel 10 s after your last
 change, so other apps can use it. A change shows "Saving…" until the buds confirm it.

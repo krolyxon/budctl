@@ -127,6 +127,7 @@ Exit codes:
   - The cursor shows only after a key press, and the first key only shows it, so nothing changes where it cannot be seen. A click hides it.
 - **Buds:** `worker.rs` owns the session, on a thread of its own, and answers each command with one event, in order. It opens the session when a command needs it, answers the buds' own requests while it waits (`Session::serve`), and closes it 10 s after the last command. A write shows "Saving…" until the buds' read-back arrives, and takes no second write meanwhile. A failure says why, with "Try again". `--demo` shows made-up buds; `--debug` hex-dumps frames like the CLI.
 - **Logic:** keys and clicks both become messages for one `update` function, which stays testable without a display. `iced_test` renders pages to PNG, so the look can be checked without the owner.
+- **Screenshots:** the README's come from the demo buds: `cargo test -p budctl-gui readme_screenshots -- --ignored` renders them again into `docs/screenshots/`.
 
 ## Working with Claude
 
