@@ -559,6 +559,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | G3 `budctl-gui --debug`: the first reading, then noise control transparency → noise cancelling, game mode on → off | pass (protocol) | One session for the reading and all four writes, with no new connection between them. The acks and read-backs match W1 and W3; the game-mode read-back, 1 s after the ack, showed the change. The window named the custom preset from the `0x0122` list. No request from the buds came in while the session waited. The log ends about 1 s after the last write, so the 10 s idle close is not in it yet |
 | 2026-10-27 | `status` with a control app connected on the phone, dual connection on | pass | Every read answered, 40-190 ms after its request (HW1: 50-90 ms). Changes budctl made showed up in the phone app. The T310 serves both hosts at once. See [question 4](#open) |
 | 2026-10-27 | W11b `eq custom-4`, `eq custom-4 50=+3 16000=-2`, then `50=0 16000=0` | pass | The write matched the derived frame, was acked with `00 04` and read back on the first try. The preset is flat again. Then `eq pure-raw`, `eq custom-4` and `status`: `status` showed `custom-4`, so saving also selects. See [§10.9](#custom-eq-save) |
 | 2026-10-27 | W6b `bass -5`, `bass 5`, `bass 0` (bass boost off) | pass (protocol) | All acked with `0x841B 00`. No read-back is possible. By ear, at most a slight difference. See [§10.4](#bass-write) |
