@@ -14,34 +14,52 @@ use crate::{Draft, Item, Marks, Message};
 const SAVING: &str = "Saving…";
 
 /// What the keyboard cursor can rest on, top to bottom, as [`view`] shows them: each preset,
-/// "New preset", then, when a custom preset is in use, "Rename", "Delete" and its bands.
-pub fn items(buds: &Buds) -> Vec<Item> {
+/// with a custom one's pencil and bin; "New preset"; then, while a preset's bands are open,
+/// "Rename", "Done" and its bands.
+pub fn items(buds: &Buds, editing: Option<u8>) -> Vec<Item> {
     let mut items = Vec::new();
-    if let Some(eq) = &buds.eq {
-        items.extend(eq.presets.iter().map(|p| Item::Preset(p.id)));
-        items.push(Item::NewPreset);
-        if let Some(preset) = in_use(buds) {
-            items.extend([Item::Rename(preset.id), Item::Delete(preset.id)]);
-            items.extend(preset.bands.iter().map(|band| Item::Band(preset.id, band.hz)));
+    let Some(eq) = &buds.eq else {
+        return items;
+    };
+    for preset in &eq.presets {
+        items.push(Item::Preset(preset.id));
+        if preset.custom {
+            items.extend([Item::Edit(preset.id), Item::Delete(preset.id)]);
         }
+    }
+    items.push(Item::NewPreset);
+    if let Some(preset) = edited(buds, editing) {
+        items.extend([Item::Rename(preset.id), Item::Done]);
+        items.extend(preset.bands.iter().map(|band| Item::Band(preset.id, band.hz)));
     }
     items
 }
 
-/// The custom preset in use, if one is: only its bands can be changed.
+/// The custom preset in use, if one is.
 pub fn in_use(buds: &Buds) -> Option<&EqPreset> {
     let eq = buds.eq.as_ref()?;
     let current = eq.current.as_deref()?;
     eq.presets.iter().find(|p| p.custom && buds::key(p) == current)
 }
 
-/// `draft`: bands moved on the screen and not saved on the buds yet.
-pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a Draft>, marks: Marks) -> Element<'a, Message> {
+/// The custom preset whose bands are open, if any.
+pub fn edited(buds: &Buds, editing: Option<u8>) -> Option<&EqPreset> {
+    buds.preset(editing?).filter(|preset| preset.custom)
+}
+
+/// `editing`: the custom preset whose bands are open; `draft`: bands moved on the screen and not
+/// saved on the buds yet.
+pub fn view<'a>(
+    look: Look,
+    buds: &'a Buds,
+    editing: Option<u8>,
+    draft: Option<&'a Draft>,
+    marks: Marks,
+) -> Element<'a, Message> {
+    let p = look.p;
     let title = ui::title(look, "Equalizer");
     let Some(eq) = &buds.eq else {
-        let none = text("These buds did not list their presets.")
-            .size(14)
-            .color(look.p.dim);
+        let none = text("These buds did not list their presets.").size(14).color(p.dim);
         return column![title, none].spacing(12).into();
     };
     let current = eq.current.as_deref();
@@ -49,38 +67,61 @@ pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a Draft>, marks: Mar
         .presets
         .iter()
         .map(|preset| {
+            let id = preset.id;
             let chosen = current == Some(buds::key(preset).as_str());
-            let subtitle = if marks.pending.contains(&Item::Preset(preset.id)) {
+            let subtitle = if marks.pending.contains(&Item::Preset(id)) {
                 SAVING
+            } else if preset.custom && editing == Some(id) {
+                "Your preset, open below"
             } else if preset.custom {
                 "Your preset"
             } else {
                 "Built in"
             };
             let mark: Element<'a, Message> = if chosen {
-                icons::icon(Icon::Check, 20.0, look.p.icon)
+                icons::icon(Icon::Check, 20.0, p.icon)
             } else {
                 space().width(20).into()
+            };
+            let trailing: Element<'a, Message> = if preset.custom {
+                row![
+                    mark,
+                    ui::icon_button(
+                        look,
+                        Icon::Pencil,
+                        marks.focus == Some(Item::Edit(id)),
+                        Message::EditPreset(id)
+                    ),
+                    ui::icon_button(
+                        look,
+                        Icon::Trash,
+                        marks.focus == Some(Item::Delete(id)),
+                        Message::DeletePreset(id)
+                    ),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+            } else {
+                mark
             };
             ui::setting(
                 look,
                 Icon::Equalizer,
                 buds::shown_name(preset),
                 Some(subtitle.to_owned()),
-                mark,
-                Some(Message::Preset(preset.id)),
-                marks.focus == Some(Item::Preset(preset.id)),
+                trailing,
+                Some(Message::Preset(id)),
+                marks.focus == Some(Item::Preset(id)),
             )
         })
         .collect();
-    let editor = match in_use(buds) {
+    let editor: Element<'a, Message> = match edited(buds, editing) {
         Some(preset) => bands(look, preset, draft, marks),
-        None => {
-            let note = text("Built-in presets cannot be changed. Pick one of your presets to change its bands.")
-                .size(14)
-                .color(look.p.dim);
-            ui::panel(look, note.into())
-        }
+        None => text("Use the pencil on one of your presets to change its bands.")
+            .size(13)
+            .color(p.dim)
+            .into(),
     };
     column![title, ui::card(look, rows), new_preset(look, marks), editor]
         .spacing(18)
@@ -142,13 +183,16 @@ fn bands<'a>(look: Look, preset: &'a EqPreset, draft: Option<&'a Draft>, marks: 
     ))
     .push(ui::pill_with(
         look,
-        "Delete",
+        "Done",
         false,
-        marks.focus == Some(Item::Delete(id)),
-        Message::DeletePreset(id),
+        marks.focus == Some(Item::Done),
+        Message::DoneEditing,
     ))
     .spacing(10)
     .align_y(Alignment::Center);
+    let note = text("Moving a band saves this preset and puts it in use, so you hear it.")
+        .size(13)
+        .color(p.dim);
     let sliders = gains.iter().fold(Row::new().spacing(6), |sliders, &band| {
         let focused = marks.focus == Some(Item::Band(id, band.hz));
         let hz = band.hz;
@@ -197,7 +241,7 @@ fn bands<'a>(look: Look, preset: &'a EqPreset, draft: Option<&'a Draft>, marks: 
                 }),
         )
     });
-    ui::panel(look, column![heading, sliders].spacing(16).into())
+    ui::panel(look, column![heading, note, sliders].spacing(14).into())
 }
 
 /// `3` → "+3", `0` → "0", `-2` → "-2".
@@ -220,19 +264,21 @@ mod tests {
 
     #[test]
     fn items_follow_the_page() {
-        let items = items(&buds::demo());
-        assert_eq!(items.len(), 5 + 1 + 2 + 6);
-        assert_eq!(items.first(), Some(&Item::Preset(0)));
-        assert_eq!(items.get(5), Some(&Item::NewPreset));
-        assert_eq!(items.get(6), Some(&Item::Rename(4)));
-        assert_eq!(items.get(7), Some(&Item::Delete(4)));
-        assert_eq!(items.get(8), Some(&Item::Band(4, 50)));
-        assert_eq!(items.last(), Some(&Item::Band(4, 16000)));
-        // With a built-in preset in use, there is nothing to edit.
-        let mut buds = buds::demo();
-        buds.set_eq("pure-bass".to_owned());
-        assert_eq!(super::items(&buds).last(), Some(&Item::NewPreset));
-        assert!(super::items(&buds::unknown()).is_empty());
+        let buds = buds::demo();
+        let closed = items(&buds, None);
+        assert_eq!(closed.len(), 4 + 3 + 1);
+        assert_eq!(closed.first(), Some(&Item::Preset(0)));
+        assert_eq!(
+            closed.get(4..),
+            Some(&[Item::Preset(4), Item::Edit(4), Item::Delete(4), Item::NewPreset][..])
+        );
+        let open = items(&buds, Some(4));
+        assert_eq!(open.len(), 8 + 2 + 6);
+        assert_eq!(open.get(8..10), Some(&[Item::Rename(4), Item::Done][..]));
+        assert_eq!(open.last(), Some(&Item::Band(4, 16000)));
+        // A built-in preset has no bands to open.
+        assert_eq!(items(&buds, Some(0)).len(), 8);
+        assert!(items(&buds::unknown(), None).is_empty());
     }
 
     #[test]

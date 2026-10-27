@@ -198,8 +198,12 @@ enum Item {
     NewPreset,
     /// "Rename", on a custom EQ preset's card.
     Rename(u8),
-    /// "Delete", on a custom EQ preset's card.
+    /// The bin on a custom EQ preset's row.
     Delete(u8),
+    /// The pencil on a custom EQ preset's row: open its bands.
+    Edit(u8),
+    /// "Done", on the open bands.
+    Done,
 }
 
 /// The dialog that asks for a preset's name.
@@ -299,6 +303,10 @@ enum Message {
     NameInput(String),
     SubmitName,
     CancelName,
+    /// Open a custom preset's (by its id) bands, or close them if they are open.
+    EditPreset(u8),
+    /// Close the open bands.
+    DoneEditing,
     /// Delete a custom preset (by its id), after a confirmation.
     DeletePreset(u8),
     /// The answer to "Delete the preset?".
@@ -356,6 +364,8 @@ struct App {
     prompt: Option<NamePrompt>,
     /// "Delete the preset?" is open, for this preset.
     confirm_delete: Option<u8>,
+    /// The custom preset whose bands are open on the Equalizer page.
+    editing: Option<u8>,
 }
 
 impl App {
@@ -395,6 +405,7 @@ impl App {
             palette_problem: None,
             prompt: None,
             confirm_delete: None,
+            editing: None,
         };
         app.refresh_palette();
         app
@@ -450,12 +461,19 @@ impl App {
             }
             Message::SubmitName => self.submit_name(),
             Message::CancelName => self.prompt = None,
+            Message::EditPreset(id) => {
+                self.editing = if self.editing == Some(id) { None } else { Some(id) };
+            }
+            Message::DoneEditing => self.editing = None,
             Message::DeletePreset(id) => self.confirm_delete = Some(id),
             Message::ConfirmDelete(yes) => {
                 if let (true, Some(id)) = (yes, self.confirm_delete.take())
                     && let Some(preset) = self.buds.preset(id)
                 {
                     let command = Command::DeleteEq(buds::key(preset));
+                    if self.editing == Some(id) {
+                        self.editing = None;
+                    }
                     self.write(Item::Preset(id), command);
                 }
                 self.confirm_delete = None;
@@ -530,6 +548,7 @@ impl App {
                     let model = customs().next().cloned();
                     let id = customs().map(|p| p.id).max().map_or(4, |id| id.saturating_add(1));
                     if let Some(model) = model {
+                        self.editing = Some(id);
                         self.buds.set_custom(EqPreset {
                             name,
                             id,
@@ -664,9 +683,13 @@ impl App {
                 }
             }
             Event::Presets(eq) => {
-                self.in_flight.pop_front();
+                let done = self.in_flight.pop_front();
                 self.buds.set_presets(eq);
                 self.link = Link::Live;
+                // A new preset opens its bands: it is the one in use.
+                if done == Some(Some(Item::NewPreset)) {
+                    self.editing = equalizer::in_use(&self.buds).map(|preset| preset.id);
+                }
             }
             Event::Bass(level) => {
                 self.in_flight.pop_front();
@@ -981,7 +1004,7 @@ impl App {
     fn items(&self) -> Vec<Item> {
         match self.page {
             Page::Overview if self.has_reading() => overview::items(&self.buds),
-            Page::Equalizer if self.has_reading() => equalizer::items(&self.buds),
+            Page::Equalizer if self.has_reading() => equalizer::items(&self.buds, self.editing),
             Page::Gestures if self.has_reading() => gestures::items(&self.buds),
             Page::Earbuds if self.has_reading() => earbuds::items(),
             _ => Vec::new(),
@@ -1093,6 +1116,8 @@ impl App {
             Item::NewPreset => (action != Action::Left).then_some(Message::NewPreset),
             Item::Rename(id) => (action != Action::Left).then_some(Message::RenamePreset(id)),
             Item::Delete(id) => (action != Action::Left).then_some(Message::DeletePreset(id)),
+            Item::Edit(id) => (action != Action::Left).then_some(Message::EditPreset(id)),
+            Item::Done => (action != Action::Left).then_some(Message::DoneEditing),
             Item::Bass => {
                 let (low, high) = self.buds.bass_range?;
                 let now = self.bass_draft.or(self.buds.bass);
@@ -1186,7 +1211,7 @@ impl App {
                     focus: self.focus(),
                     pending: &pending,
                 };
-                equalizer::view(look, &self.buds, self.draft.as_ref(), marks)
+                equalizer::view(look, &self.buds, self.editing, self.draft.as_ref(), marks)
             }
             Page::Gestures if self.has_reading() => {
                 let marks = Marks {
@@ -1855,12 +1880,19 @@ mod tests {
         press(&mut app, "j l");
         assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
         assert_eq!(app.buds.eq_name(), "Pure raw");
-        // Back to Custom1, the fifth preset: its bands come back.
-        press(&mut app, "j j j j l");
-        assert_eq!(app.buds.status.eq.as_deref(), Some("custom-4"));
+        // Custom1's pencil, after the four built-in presets and Custom1's row, opens its bands.
+        press(&mut app, "j j j j j Enter");
+        assert_eq!(app.editing, Some(4));
+        assert_eq!(
+            app.buds.status.eq.as_deref(),
+            Some("pure-raw"),
+            "opening selects nothing"
+        );
         press(&mut app, "G");
         assert_eq!(app.focus(), Some(Item::Band(4, 16000)));
+        // Moving a band saves the preset, which puts it in use.
         press(&mut app, "l");
+        assert_eq!(app.buds.status.eq.as_deref(), Some("custom-4"));
         let last = |app: &App| app.buds.preset(4).unwrap().bands.last().unwrap().gain;
         assert_eq!(last(&app), 3);
         press(&mut app, "l l l l l");
@@ -1872,6 +1904,7 @@ mod tests {
         let (mut app, commands) = live();
         let _ = commands.try_recv();
         let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::EditPreset(4));
         press(&mut app, "J G G l");
         let gain = |bands: &[EqBand]| bands.last().map(|band| band.gain);
         assert!(matches!(
@@ -2050,6 +2083,7 @@ mod tests {
             .find(|(_, name)| *name == "Gym")
             .map(|(id, _)| id)
             .unwrap();
+        assert_eq!(app.editing, Some(gym), "and its bands open");
 
         let _ = app.update(Message::RenamePreset(gym));
         assert_eq!(app.prompt.as_ref().map(|p| p.text.as_str()), Some("Gym"));
@@ -2080,6 +2114,7 @@ mod tests {
         presets.current = Some("custom-5".to_owned());
         let _ = app.update(Message::Worker(Event::Presets(presets)));
         assert_eq!(app.buds.eq_name(), "Gym");
+        assert_eq!(app.editing, Some(5));
         assert!(app.pending().is_empty());
 
         let _ = app.update(Message::RenamePreset(4));
@@ -2114,11 +2149,19 @@ mod tests {
     }
 
     #[test]
-    fn only_the_preset_in_use_shows_its_bands() {
+    fn the_pencil_opens_the_bands_and_done_closes_them() {
         let mut app = app();
-        press(&mut app, "J j l");
-        assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
-        assert!(!app.items().iter().any(|item| matches!(item, Item::Band(..))));
+        press(&mut app, "J");
+        let bands = |app: &App| app.items().iter().any(|item| matches!(item, Item::Band(..)));
+        assert!(!bands(&app));
+        let _ = app.update(Message::EditPreset(4));
+        assert!(bands(&app));
+        let _ = app.update(Message::DoneEditing);
+        assert!(!bands(&app));
+        // The pencil again closes them too.
+        let _ = app.update(Message::EditPreset(4));
+        let _ = app.update(Message::EditPreset(4));
+        assert!(!bands(&app));
     }
 
     #[test]
@@ -2172,7 +2215,11 @@ mod tests {
         shots.push(("overview-full".to_owned(), 1240.0, on(Page::Overview, "")));
         shots.push(("overview-cursor".to_owned(), 800.0, on(Page::Overview, "j j j j")));
         shots.push(("keys".to_owned(), 800.0, on(Page::Overview, "?")));
-        shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k")));
+        let mut editing = on(Page::Equalizer, "");
+        let _ = editing.update(Message::EditPreset(4));
+        press(&mut editing, "G G k k");
+        shots.push(("equalizer-cursor".to_owned(), 1100.0, editing));
+        shots.push(("equalizer-pencil".to_owned(), 800.0, on(Page::Equalizer, "j j j j j j")));
         shots.push(("gestures-cursor".to_owned(), 1000.0, on(Page::Gestures, "j j")));
         shots.push(("find-confirm".to_owned(), 800.0, on(Page::Earbuds, "j Enter")));
         shots.push((

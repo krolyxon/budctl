@@ -270,6 +270,25 @@ pub fn pill_with<'a>(
         .into()
 }
 
+/// A round button with just an icon, like the pencil on a preset's row.
+pub fn icon_button<'a>(look: Look, icon: Icon, focused: bool, on_press: Message) -> Element<'a, Message> {
+    let p = look.p;
+    button(icons::icon(icon, 19.0, if focused { p.fg } else { p.dim }))
+        .on_press(on_press)
+        .padding(8)
+        .style(move |_, status| button::Style {
+            background: (focused || hovered(status)).then_some(p.surface_highest.into()),
+            text_color: p.fg,
+            border: Border {
+                color: p.accent,
+                width: if focused { 2.0 } else { 0.0 },
+                radius: 999.0.into(),
+            },
+            ..button::Style::default()
+        })
+        .into()
+}
+
 /// A wide button with an outline, like "Disconnect".
 pub fn outline_button<'a>(look: Look, label: &'a str, on_press: Message) -> Element<'a, Message> {
     let p = look.p;

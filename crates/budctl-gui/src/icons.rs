@@ -28,6 +28,8 @@ pub enum Icon {
     Info,
     Chip,
     Keys,
+    Pencil,
+    Trash,
 }
 
 /// `icon` at `size` pixels, in `color`.
@@ -255,6 +257,17 @@ fn draw_icon(pen: &mut Pen, icon: Icon) {
             ] {
                 pen.line(from, to);
             }
+        }
+        Icon::Pencil => {
+            pen.polyline(&[(4.5, 19.5), (5.5, 15.0), (15.5, 5.0), (19.0, 8.5), (9.0, 18.5)], true);
+            pen.line((13.0, 7.5), (16.5, 11.0));
+        }
+        Icon::Trash => {
+            pen.line((4.0, 6.5), (20.0, 6.5));
+            pen.polyline(&[(9.0, 6.5), (9.5, 3.5), (14.5, 3.5), (15.0, 6.5)], false);
+            pen.polyline(&[(6.0, 6.5), (7.0, 20.5), (17.0, 20.5), (18.0, 6.5)], false);
+            pen.line((10.0, 10.5), (10.0, 16.5));
+            pen.line((14.0, 10.5), (14.0, 16.5));
         }
         Icon::Info => {
             pen.circle(12.0, 12.0, 9.0);
