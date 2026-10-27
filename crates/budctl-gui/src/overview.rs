@@ -1,10 +1,12 @@
 //! The Overview page: battery, noise control, the switches, and the way to the other pages.
 
 use budctl_core::status::{AncLevel, Charge, NoiseMode, Switch};
-use iced::widget::{column, container, row, text};
-use iced::{Alignment, Element, Length};
+use iced::alignment::Horizontal;
+use iced::widget::{column, container, row, slider, text};
+use iced::{Alignment, Border, Element, Length};
 
 use crate::buds::Buds;
+use crate::equalizer;
 use crate::icons::{self, Icon, Part, RingColors};
 use crate::theme::Look;
 use crate::ui::{self, Segment};
@@ -19,15 +21,30 @@ pub fn items(buds: &Buds) -> Vec<Item> {
             items.push(Item::AncLevel);
         }
     }
-    items.extend(shown(&buds.status.switches).into_iter().map(|s| Item::Switch(s.key)));
+    for switch in shown(&buds.status.switches) {
+        items.push(Item::Switch(switch.key));
+        if switch.key == BASS_BOOST && buds.bass_range.is_some() {
+            items.push(Item::Bass);
+        }
+    }
     items.extend(MORE.map(|(page, _, _)| Item::Open(page)));
     items
 }
 
+/// The switch the bass level shows under.
+const BASS_BOOST: &str = "bass-boost";
+
 /// Shown instead of an item's subtitle while a write to it is on its way.
 const SAVING: &str = "Saving…";
 
-pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel, marks: Marks) -> Element<'a, Message> {
+/// `bass`: a bass level moved on the screen and not set on the buds yet.
+pub fn view<'a>(
+    look: Look,
+    buds: &'a Buds,
+    anc_level: AncLevel,
+    bass: Option<i8>,
+    marks: Marks,
+) -> Element<'a, Message> {
     column![ui::title(look, "Overview"), battery(look, buds)]
         .push(
             buds.status
@@ -35,7 +52,7 @@ pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel, marks: Marks) -
                 .as_ref()
                 .map(|now| noise_control(look, &now.mode, anc_level, marks)),
         )
-        .push(switches(look, &buds.status.switches, marks))
+        .push(switches(look, buds, bass, marks))
         .push(more(look, buds, marks.focus))
         .spacing(18)
         .into()
@@ -151,11 +168,11 @@ fn shown(switches: &[Switch]) -> Vec<&Switch> {
     shown
 }
 
-fn switches<'a>(look: Look, switches: &[Switch], marks: Marks) -> Element<'a, Message> {
+fn switches<'a>(look: Look, buds: &Buds, bass: Option<i8>, marks: Marks) -> Element<'a, Message> {
     let known = |key: &str| SWITCHES.iter().find(|(k, _, _)| *k == key);
-    let rows = shown(switches)
-        .into_iter()
-        .map(|s| {
+    let mut rows = Vec::new();
+    for s in shown(&buds.status.switches) {
+        rows.push({
             let (icon, about) = known(s.key).map_or((Icon::Settings, None), |&(_, icon, about)| (icon, Some(about)));
             let saving = marks.pending.contains(&Item::Switch(s.key));
             let subtitle = if saving { Some(SAVING) } else { about }.map(str::to_owned);
@@ -168,9 +185,67 @@ fn switches<'a>(look: Look, switches: &[Switch], marks: Marks) -> Element<'a, Me
                 Some(Message::Switch(s.key, !s.on)),
                 marks.focus == Some(Item::Switch(s.key)),
             )
-        })
-        .collect();
+        });
+        if let (BASS_BOOST, Some(range)) = (s.key, buds.bass_range) {
+            rows.push(bass_level(look, range, bass.or(buds.bass), marks));
+        }
+    }
     ui::card(look, rows)
+}
+
+/// The bass level: the buds take it but do not report it, so the row shows the last level set
+/// from this window, if any.
+fn bass_level<'a>(look: Look, (low, high): (i8, i8), level: Option<i8>, marks: Marks) -> Element<'a, Message> {
+    let p = look.p;
+    let about = if marks.pending.contains(&Item::Bass) {
+        SAVING
+    } else {
+        "Last set here: the buds do not report it"
+    };
+    let shown = level.map_or_else(|| "Not set".to_owned(), equalizer::gain);
+    let slider = slider(
+        i16::from(low)..=i16::from(high),
+        i16::from(level.unwrap_or(0)),
+        |level| Message::Bass {
+            level: i8::try_from(level).unwrap_or(0),
+            save: false,
+        },
+    )
+    .on_release(Message::SaveBass)
+    .width(200)
+    .style(move |_, _| slider::Style {
+        rail: slider::Rail {
+            backgrounds: (p.accent.into(), p.surface_highest.into()),
+            width: 6.0,
+            border: Border::default().rounded(3),
+        },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Circle { radius: 9.0 },
+            background: p.fg.into(),
+            border_width: 2.0,
+            border_color: p.accent,
+        },
+    });
+    let control = row![
+        text(shown)
+            .size(14)
+            .font(look.medium())
+            .color(p.dim)
+            .width(64)
+            .align_x(Horizontal::Right),
+        slider
+    ]
+    .spacing(14)
+    .align_y(Alignment::Center);
+    ui::setting(
+        look,
+        Icon::Bass,
+        "Bass level",
+        Some(about.to_owned()),
+        control.into(),
+        None,
+        marks.focus == Some(Item::Bass),
+    )
 }
 
 /// The rows that open other pages: the page, its icon and title.

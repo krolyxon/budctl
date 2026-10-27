@@ -1005,7 +1005,7 @@ impl App {
                     focus: self.focus(),
                     pending: &pending,
                 };
-                overview::view(look, &self.buds, self.anc_level, marks)
+                overview::view(look, &self.buds, self.anc_level, self.bass_draft, marks)
             }
             Page::Overview => self.connecting(),
             Page::Equalizer if self.has_reading() => {
@@ -1013,7 +1013,7 @@ impl App {
                     focus: self.focus(),
                     pending: &pending,
                 };
-                equalizer::view(look, &self.buds, self.draft.as_ref(), self.bass_draft, marks)
+                equalizer::view(look, &self.buds, self.draft.as_ref(), marks)
             }
             Page::Gestures if self.has_reading() => {
                 let marks = Marks {
@@ -1348,6 +1348,7 @@ mod tests {
                 Item::Switch("game"),
                 Item::Switch("spatial"),
                 Item::Switch("bass-boost"),
+                Item::Bass,
                 Item::Switch("wind"),
                 Item::Switch("dual"),
                 Item::Open(Page::Equalizer),
@@ -1491,7 +1492,7 @@ mod tests {
         assert_eq!(app.link, Link::Live);
         assert_eq!(app.buds.name, "realme Buds T310");
         assert!(app.buds.connected);
-        assert_eq!(app.items().len(), 10);
+        assert_eq!(app.items().len(), 11);
     }
 
     #[test]
@@ -1594,7 +1595,7 @@ mod tests {
         press(&mut app, "j l");
         assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
         assert_eq!(app.buds.eq_name(), "Pure raw");
-        press(&mut app, "G k");
+        press(&mut app, "G");
         assert_eq!(app.focus(), Some(Item::Band(4, 16000)));
         // Moving a band saves the custom preset, which also selects it.
         press(&mut app, "l");
@@ -1610,7 +1611,7 @@ mod tests {
         let (mut app, commands) = live();
         let _ = commands.try_recv();
         let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
-        press(&mut app, "J G G k l");
+        press(&mut app, "J G G l");
         let gain = |bands: &[EqBand]| bands.last().map(|band| band.gain);
         assert!(matches!(
             commands.try_recv(),
@@ -1731,8 +1732,8 @@ mod tests {
     #[test]
     fn the_bass_level_by_key() {
         let mut app = app();
-        press(&mut app, "J G G");
-        assert_eq!(app.focus(), Some(Item::Bass));
+        press(&mut app, "j j j j j j");
+        assert_eq!(app.focus(), Some(Item::Bass), "under bass boost, on the Overview");
         assert_eq!(app.buds.bass, None, "the buds do not say");
         press(&mut app, "l");
         assert_eq!(app.buds.bass, Some(0), "the first step starts from the middle");
@@ -1815,10 +1816,14 @@ mod tests {
         shots.push(("overview-full".to_owned(), 1240.0, on(Page::Overview, "")));
         shots.push(("overview-cursor".to_owned(), 800.0, on(Page::Overview, "j j j j")));
         shots.push(("keys".to_owned(), 800.0, on(Page::Overview, "?")));
-        shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k k")));
+        shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k")));
         shots.push(("gestures-cursor".to_owned(), 1000.0, on(Page::Gestures, "j j")));
         shots.push(("find-confirm".to_owned(), 800.0, on(Page::Earbuds, "j Enter")));
-        shots.push(("equalizer-bass".to_owned(), 1300.0, on(Page::Equalizer, "G G l l")));
+        shots.push((
+            "overview-bass".to_owned(),
+            1340.0,
+            on(Page::Overview, "j j j j j j l l"),
+        ));
         let mut connecting = App::new(palette.clone(), font, None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));
