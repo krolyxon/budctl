@@ -23,6 +23,8 @@ pub enum Action {
     PreviousPage,
     /// A page by its place in the sidebar, from 0.
     Page(usize),
+    /// Read the buds again.
+    Refresh,
     /// Show or hide the list of keys.
     Help,
     /// Close the list of keys, else hide the cursor.
@@ -31,7 +33,7 @@ pub enum Action {
 }
 
 /// The keys, as the list of keys shows them.
-pub const HELP: [(&str, &str); 10] = [
+pub const HELP: [(&str, &str); 11] = [
     ("j  k   ↓  ↑", "move the cursor"),
     ("h  l   ←  →", "previous / next choice, off / on"),
     ("Enter  Space", "toggle, next choice, or open"),
@@ -39,6 +41,7 @@ pub const HELP: [(&str, &str); 10] = [
     ("J  K   Ctrl+Tab", "next / previous page"),
     ("gt  gT", "next / previous page"),
     ("1 … 5", "go to a page"),
+    ("r", "read the buds again"),
     ("Esc", "hide the cursor"),
     ("?", "these keys"),
     ("q", "quit"),
@@ -93,6 +96,7 @@ impl Keys {
                 "J" => Some(Action::NextPage),
                 "K" => Some(Action::PreviousPage),
                 " " => Some(Action::Activate),
+                "r" => Some(Action::Refresh),
                 "?" => Some(Action::Help),
                 "q" => Some(Action::Quit),
                 digit => match digit.parse::<usize>() {
@@ -148,6 +152,7 @@ mod tests {
             ("C-j", Some(Action::NextPage)),
             ("3", Some(Action::Page(2))),
             ("0", None),
+            ("r", Some(Action::Refresh)),
             ("?", Some(Action::Help)),
             ("Esc", Some(Action::Escape)),
             ("q", Some(Action::Quit)),

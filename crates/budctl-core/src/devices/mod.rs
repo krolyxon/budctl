@@ -31,6 +31,14 @@ pub trait Device: Sync {
 
 /// An open control link to one pair of buds. Dropping it closes the link.
 pub trait Session: Send {
+    /// Answer what the buds sent since the last call, without waiting. Some buds drop the link
+    /// when their own requests (the time request, for one) go unanswered, so a front end that
+    /// keeps a session open between commands calls this every so often. An error means the link
+    /// is gone.
+    fn serve(&mut self) -> Result<()> {
+        Ok(())
+    }
+
     /// Battery, noise control, EQ, switches and whatever else the model can read.
     fn status(&mut self) -> Result<Status>;
 

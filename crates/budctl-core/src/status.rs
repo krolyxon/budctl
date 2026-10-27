@@ -6,7 +6,7 @@ use serde::{Serialize, Serializer};
 /// Bumped whenever the JSON shape changes incompatibly.
 pub const JSON_SCHEMA: u32 = 1;
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Status {
     pub battery: Battery,
     pub noise_control: Option<NoiseControl>,
@@ -114,7 +114,7 @@ pub struct Gesture {
 }
 
 /// The EQ presets the buds have, and which one is in use.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct EqPresets {
     /// Name of the preset in use, as in [`Status::eq`].
     pub current: Option<String>,

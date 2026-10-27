@@ -66,7 +66,7 @@ Many realme / OPPO / OnePlus buds share one protocol family. `devices/realme_t31
 ## Connection behavior
 
 - The control channel is often single-client. If an app on the phone holds it, connecting from Linux may fail. Report that plainly ("control channel busy — is another app connected?") instead of retrying in a loop.
-- CLI commands connect, act and disconnect. The GUI must also release the channel when idle rather than hold it open.
+- CLI commands connect, act and disconnect. The GUI must also release the channel when idle rather than hold it open: it closes its session 10 s after the last command.
 - Timeouts on every read. Buds that don't answer should produce a clear error, never a hang.
 - While a session waits for anything, it keeps answering the buds' own requests (e.g. the time request). Never `thread::sleep` in core; clippy bans it.
 
@@ -124,6 +124,7 @@ Exit codes:
   - `h`/`l` pick the previous or next choice, or turn a switch off or on, and `l` opens a row's page. Enter and Space toggle, step round the choices, or open.
   - `J`/`K`, `Ctrl+Tab`, `gt`/`gT` and `1`–`5` change pages. `Esc` hides the cursor, `q` quits.
   - The cursor shows only after a key press, and the first key only shows it, so nothing changes where it cannot be seen. A click hides it.
+- **Buds:** `worker.rs` owns the session, on a thread of its own, and answers each command with one event, in order. It opens the session when a command needs it, answers the buds' own requests while it waits (`Session::serve`), and closes it 10 s after the last command. A write shows "Saving…" until the buds' read-back arrives, and takes no second write meanwhile. A failure says why, with "Try again". `--demo` shows made-up buds; `--debug` hex-dumps frames like the CLI.
 - **Logic:** keys and clicks both become messages for one `update` function, which stays testable without a display. `iced_test` renders pages to PNG, so the look can be checked without the owner.
 
 ## Working with Claude

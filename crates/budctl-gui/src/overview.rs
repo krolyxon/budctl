@@ -24,17 +24,27 @@ pub fn items(buds: &Buds) -> Vec<Item> {
     items
 }
 
-/// `focus` is the item under the keyboard cursor, if it shows.
-pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel, focus: Option<Item>) -> Element<'a, Message> {
+/// What the page needs besides the buds: the item under the keyboard cursor, if it shows, and the
+/// items with a write on its way.
+#[derive(Clone, Copy)]
+pub struct Marks<'a> {
+    pub focus: Option<Item>,
+    pub pending: &'a [Item],
+}
+
+/// Shown instead of an item's subtitle while a write to it is on its way.
+const SAVING: &str = "Saving…";
+
+pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel, marks: Marks) -> Element<'a, Message> {
     column![ui::title(look, "Overview"), battery(look, buds)]
         .push(
             buds.status
                 .noise_control
                 .as_ref()
-                .map(|now| noise_control(look, &now.mode, anc_level, focus)),
+                .map(|now| noise_control(look, &now.mode, anc_level, marks)),
         )
-        .push(switches(look, &buds.status.switches, focus))
-        .push(more(look, buds, focus))
+        .push(switches(look, &buds.status.switches, marks))
+        .push(more(look, buds, marks.focus))
         .spacing(18)
         .into()
 }
@@ -80,7 +90,8 @@ fn battery<'a>(look: Look, buds: &Buds) -> Element<'a, Message> {
     ui::card(look, vec![container(gauges).padding([22, 8]).into()])
 }
 
-fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel, focus: Option<Item>) -> Element<'a, Message> {
+fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel, marks: Marks) -> Element<'a, Message> {
+    let focus = marks.focus;
     let modes = [
         (Icon::NoiseOff, "Off", NoiseMode::Off),
         (Icon::Anc, "Noise cancelling", NoiseMode::Anc(anc_level)),
@@ -114,7 +125,12 @@ fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel, focus: Option<
     ]
     .align_y(Alignment::Center)
     .padding([0, 8]);
+    let saving = marks
+        .pending
+        .contains(&Item::NoiseMode)
+        .then(|| container(text(SAVING).size(13).color(look.p.icon)).center_x(Length::Fill));
     column![ui::segmented(look, segments, true, focus == Some(Item::NoiseMode))]
+        .push(saving)
         .push((mode == NoiseMode::Anc(anc_level).name()).then_some(strength))
         .spacing(12)
         .into()
@@ -143,14 +159,14 @@ fn shown(switches: &[Switch]) -> Vec<&Switch> {
     shown
 }
 
-fn switches<'a>(look: Look, switches: &[Switch], focus: Option<Item>) -> Element<'a, Message> {
+fn switches<'a>(look: Look, switches: &[Switch], marks: Marks) -> Element<'a, Message> {
     let known = |key: &str| SWITCHES.iter().find(|(k, _, _)| *k == key);
     let rows = shown(switches)
         .into_iter()
         .map(|s| {
-            let (icon, subtitle) = known(s.key).map_or((Icon::Settings, None), |&(_, icon, subtitle)| {
-                (icon, Some(subtitle.to_owned()))
-            });
+            let (icon, about) = known(s.key).map_or((Icon::Settings, None), |&(_, icon, about)| (icon, Some(about)));
+            let saving = marks.pending.contains(&Item::Switch(s.key));
+            let subtitle = if saving { Some(SAVING) } else { about }.map(str::to_owned);
             ui::setting(
                 look,
                 icon,
@@ -158,7 +174,7 @@ fn switches<'a>(look: Look, switches: &[Switch], focus: Option<Item>) -> Element
                 subtitle,
                 ui::switch(look, s.on),
                 Message::Switch(s.key, !s.on),
-                focus == Some(Item::Switch(s.key)),
+                marks.focus == Some(Item::Switch(s.key)),
             )
         })
         .collect();

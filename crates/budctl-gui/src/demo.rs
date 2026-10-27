@@ -1,5 +1,5 @@
-//! Demo data: roughly what the owner's T310 reported at the last checkpoint. The GUI shows it
-//! until it talks to real buds.
+//! The buds the window shows: made-up ones for `--demo` (roughly what the owner's T310 reported
+//! at the last checkpoint), or an empty pair until the real buds answer.
 
 use budctl_core::status::{Battery, Charge, NoiseControl, Status, Switch};
 
@@ -42,5 +42,15 @@ pub fn buds() -> Buds {
             warnings: Vec::new(),
         },
         eq_name: "Custom1".to_owned(),
+    }
+}
+
+/// What the window shows before the real buds answer.
+pub fn unknown() -> Buds {
+    Buds {
+        name: "Your buds".to_owned(),
+        connected: false,
+        status: Status::default(),
+        eq_name: String::new(),
     }
 }

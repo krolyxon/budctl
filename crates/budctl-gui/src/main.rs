@@ -1,8 +1,8 @@
 //! `budctl-gui`: control wireless earbuds from Linux, in a window.
 //!
-//! A thin layer over budctl-core, like the CLI. For now it shows demo data: the look comes first,
-//! the live connection later (CLAUDE.md, GUI). The mouse comes first; vim-like keys work on top
-//! (`keys.rs`).
+//! A thin layer over budctl-core, like the CLI: `worker.rs` talks to the buds on a thread of its
+//! own, and the window shows what they report. The mouse comes first; vim-like keys work on top
+//! (`keys.rs`). `--demo` shows made-up buds instead.
 
 mod demo;
 mod icons;
@@ -10,11 +10,17 @@ mod keys;
 mod overview;
 mod theme;
 mod ui;
+mod worker;
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
-use budctl_core::status::{AncLevel, NoiseControl, NoiseMode};
+use budctl_core::Kind;
+use budctl_core::bt::BdAddr;
+use budctl_core::status::{AncLevel, EqPresets, NoiseControl, NoiseMode, Switch};
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::operation::{self, RelativeOffset};
 use iced::widget::{Column, column, container, mouse_area, opaque, row, scrollable, space, stack, text};
@@ -23,9 +29,13 @@ use iced::{Alignment, Border, Color, Element, Font, Length, Size, Subscription, 
 use icons::Icon;
 use keys::Action;
 use theme::Look;
+use worker::{Command, Event, Reading};
 
-const USAGE: &str = "usage: budctl-gui [--theme <palette.json>]
+const USAGE: &str = "usage: budctl-gui [--device <MAC>] [--theme <palette.json>] [--demo] [--debug]
 
+--device picks the buds when more than one supported pair is connected.
+--demo shows made-up buds, without Bluetooth.
+--debug hex-dumps every frame sent and received on stderr, as budctl --debug does.
 Colors come from --theme, else from ~/.config/budctl/theme.json if it exists, else built in.
 The palette file takes the keys of a matugen palette like Aurora's (bg, fg, primary, …).
 Press ? in the window for the keys.";
@@ -33,9 +43,13 @@ Press ? in the window for the keys.";
 /// The page's scrolling area, so the cursor can be kept in view.
 const SCROLL: &str = "page";
 
+/// When the window gets focus and the last reading is older than this, the buds are read again:
+/// the phone may have changed something meanwhile.
+const STALE: Duration = Duration::from_secs(30);
+
 fn main() -> ExitCode {
-    let theme_file = match parse_args(std::env::args().skip(1)) {
-        Ok(Args::Run { theme }) => theme.or_else(theme::default_file),
+    let options = match parse_args(std::env::args().skip(1)) {
+        Ok(Args::Run(options)) => options,
         Ok(Args::Help) => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
@@ -45,8 +59,13 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    if options.debug {
+        budctl_core::debug::enable();
+    }
+    let theme_file = options.theme.clone().or_else(theme::default_file);
     let font = theme::system_font();
-    let result = iced::application(move || App::new(theme_file.clone(), font), App::update, App::view)
+    let boot = move || App::new(theme_file.clone(), font, options.device, options.demo);
+    let result = iced::application(boot, App::update, App::view)
         .title("budctl")
         .theme(App::theme)
         .subscription(App::subscription)
@@ -70,21 +89,35 @@ fn main() -> ExitCode {
     }
 }
 
+#[derive(Default)]
+struct Options {
+    theme: Option<PathBuf>,
+    device: Option<BdAddr>,
+    demo: bool,
+    debug: bool,
+}
+
 enum Args {
-    Run { theme: Option<PathBuf> },
+    Run(Options),
     Help,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
-    let mut theme = None;
+    let mut options = Options::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--theme" => theme = Some(PathBuf::from(args.next().ok_or("--theme needs a file")?)),
+            "--theme" => options.theme = Some(PathBuf::from(args.next().ok_or("--theme needs a file")?)),
+            "--device" => {
+                let address = args.next().ok_or("--device needs an address")?;
+                options.device = Some(address.parse().map_err(|e| format!("--device: {e}"))?);
+            }
+            "--demo" => options.demo = true,
+            "--debug" => options.debug = true,
             "-h" | "--help" => return Ok(Args::Help),
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
-    Ok(Args::Run { theme })
+    Ok(Args::Run(options))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,7 +167,7 @@ impl Page {
     }
 }
 
-/// What the keyboard cursor can rest on.
+/// What the keyboard cursor can rest on, and what a write changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Item {
     NoiseMode,
@@ -145,14 +178,29 @@ enum Item {
     Open(Page),
 }
 
+/// Where the connection to the buds stands.
+#[derive(Debug, Clone, PartialEq)]
+enum Link {
+    /// Made-up buds (`--demo`): nothing talks to Bluetooth.
+    Demo,
+    /// Looking for the buds, or reading them for the first time.
+    Connecting,
+    /// The buds answered the last command.
+    Live,
+    /// The last command failed.
+    Failed { kind: Kind, message: String },
+}
+
 #[derive(Debug, Clone)]
 enum Message {
     Open(Page),
     Noise(NoiseMode),
     /// A switch's key, and whether to turn it on.
     Switch(&'static str, bool),
-    Connect(bool),
-    /// The window got focus: the palette file may have changed meanwhile.
+    /// Read the buds again.
+    Refresh,
+    Worker(Event),
+    /// The window got focus: the palette file may have changed meanwhile, and so may the buds.
     Focused,
     Key(Key, Modifiers),
     /// A mouse button went down: the mouse is in use, so the keyboard cursor hides.
@@ -175,11 +223,21 @@ struct App {
     cursor_shown: bool,
     /// Whether the list of keys is open.
     help: bool,
+    /// `--device`, for the worker.
+    device: Option<BdAddr>,
+    link: Link,
+    /// Where commands go, once the worker is up.
+    worker: Option<Sender<Command>>,
+    /// The commands sent and not answered yet, oldest first: the item each one writes, or `None`
+    /// for a read. The worker answers them in order.
+    in_flight: VecDeque<Option<Item>>,
+    /// When the buds were last read.
+    read_at: Option<Instant>,
 }
 
 impl App {
-    fn new(theme_file: Option<PathBuf>, font: Font) -> Self {
-        let buds = demo::buds();
+    fn new(theme_file: Option<PathBuf>, font: Font, device: Option<BdAddr>, demo: bool) -> Self {
+        let buds = if demo { demo::buds() } else { demo::unknown() };
         let anc_level = buds
             .status
             .noise_control
@@ -201,6 +259,11 @@ impl App {
             cursor: 0,
             cursor_shown: false,
             help: false,
+            device,
+            link: if demo { Link::Demo } else { Link::Connecting },
+            worker: None,
+            in_flight: VecDeque::new(),
+            read_at: None,
         };
         app.refresh_palette();
         app
@@ -209,31 +272,143 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Open(page) => return self.open(page),
-            Message::Noise(mode) => {
-                let level = match mode {
-                    NoiseMode::Anc(level) => {
-                        self.anc_level = level;
-                        Some(level.name().to_owned())
-                    }
-                    NoiseMode::Off | NoiseMode::Transparency => None,
-                };
-                self.buds.status.noise_control = Some(NoiseControl {
-                    mode: mode.name().to_owned(),
-                    level,
-                });
-            }
-            Message::Switch(key, on) => {
-                if let Some(switch) = self.buds.status.switches.iter_mut().find(|s| s.key == key) {
-                    switch.on = on;
+            Message::Noise(mode) => self.write(Item::NoiseMode, Command::Noise(mode)),
+            Message::Switch(key, on) => self.write(Item::Switch(key), Command::Switch(key, on)),
+            Message::Refresh => self.refresh(),
+            Message::Worker(event) => self.answer(event),
+            Message::Focused => {
+                self.refresh_palette();
+                if self.read_at.is_some_and(|at| at.elapsed() >= STALE) && self.in_flight.is_empty() {
+                    self.refresh();
                 }
             }
-            Message::Connect(on) => self.buds.connected = on,
-            Message::Focused => self.refresh_palette(),
             Message::Key(key, modifiers) => return self.key(&key, modifiers),
             Message::Pointer => self.cursor_shown = false,
             Message::CloseHelp => self.help = false,
         }
         Task::none()
+    }
+
+    /// Changes a setting: at once with the made-up buds, else through the worker. Until the buds
+    /// answer, the item shows that it is saving and takes no other write.
+    fn write(&mut self, item: Item, command: Command) {
+        if self.link == Link::Demo {
+            match command {
+                Command::Noise(mode) => self.apply_noise(NoiseControl {
+                    mode: mode.name().to_owned(),
+                    level: match mode {
+                        NoiseMode::Anc(level) => Some(level.name().to_owned()),
+                        NoiseMode::Off | NoiseMode::Transparency => None,
+                    },
+                }),
+                Command::Switch(key, on) => {
+                    if let Some(switch) = self.buds.status.switches.iter().find(|s| s.key == key) {
+                        let switch = Switch { on, ..switch.clone() };
+                        self.apply_switch(switch);
+                    }
+                }
+                Command::Read => {}
+            }
+        } else if !self.pending().contains(&item) {
+            self.send(command, Some(item));
+        }
+    }
+
+    /// Reads the buds again; with the made-up buds, starts them over.
+    fn refresh(&mut self) {
+        match self.link {
+            Link::Demo => self.buds = demo::buds(),
+            _ if self.in_flight.contains(&None) => {}
+            _ => {
+                if self.read_at.is_none() {
+                    self.link = Link::Connecting;
+                }
+                self.send(Command::Read, None);
+            }
+        }
+    }
+
+    fn send(&mut self, command: Command, item: Option<Item>) {
+        let Some(worker) = &self.worker else {
+            return;
+        };
+        if worker.send(command).is_ok() {
+            self.in_flight.push_back(item);
+        }
+    }
+
+    /// Takes in what the worker reports.
+    fn answer(&mut self, event: Event) {
+        match event {
+            Event::Ready(worker) => {
+                self.worker = Some(worker);
+                self.send(Command::Read, None);
+            }
+            Event::Found(name) => self.buds.name = name,
+            Event::Lost(message) => {
+                self.buds.connected = false;
+                self.link = Link::Failed {
+                    kind: Kind::NotFound,
+                    message,
+                };
+            }
+            Event::Read(reading) => {
+                self.in_flight.pop_front();
+                self.apply_reading(*reading);
+            }
+            Event::Noise(now) => {
+                self.in_flight.pop_front();
+                self.apply_noise(now);
+                self.link = Link::Live;
+            }
+            Event::Switch(switch) => {
+                self.in_flight.pop_front();
+                self.apply_switch(switch);
+                self.link = Link::Live;
+            }
+            Event::Failed { kind, message } => {
+                self.in_flight.pop_front();
+                if kind == Kind::NotFound {
+                    self.buds.connected = false;
+                }
+                self.link = Link::Failed { kind, message };
+            }
+        }
+    }
+
+    fn apply_reading(&mut self, reading: Reading) {
+        self.buds.eq_name = eq_name(reading.status.eq.as_deref(), reading.eq.as_ref());
+        if let Some(level) = reading
+            .status
+            .noise_control
+            .as_ref()
+            .and_then(|now| now.level.as_deref())
+            .and_then(anc_level)
+        {
+            self.anc_level = level;
+        }
+        self.buds.status = reading.status;
+        self.buds.connected = true;
+        self.link = Link::Live;
+        self.read_at = Some(Instant::now());
+    }
+
+    fn apply_noise(&mut self, now: NoiseControl) {
+        if let Some(level) = now.level.as_deref().and_then(anc_level) {
+            self.anc_level = level;
+        }
+        self.buds.status.noise_control = Some(now);
+    }
+
+    fn apply_switch(&mut self, switch: Switch) {
+        if let Some(shown) = self.buds.status.switches.iter_mut().find(|s| s.key == switch.key) {
+            *shown = switch;
+        }
+    }
+
+    /// The items with a write on its way.
+    fn pending(&self) -> Vec<Item> {
+        self.in_flight.iter().flatten().copied().collect()
     }
 
     /// Shows `page` from its top, with the cursor on its first item.
@@ -262,6 +437,10 @@ impl App {
                 self.cursor_shown = false;
                 Task::none()
             }
+            Action::Refresh => {
+                self.refresh();
+                Task::none()
+            }
             Action::NextPage => self.open(self.page.step(true)),
             Action::PreviousPage => self.open(self.page.step(false)),
             Action::Page(n) => match Page::ALL.get(n) {
@@ -281,9 +460,14 @@ impl App {
     /// What the current page offers the keyboard cursor, top to bottom.
     fn items(&self) -> Vec<Item> {
         match self.page {
-            Page::Overview => overview::items(&self.buds),
+            Page::Overview if self.has_reading() => overview::items(&self.buds),
             _ => Vec::new(),
         }
+    }
+
+    /// Whether there is anything to show: the made-up buds, or a reading of the real ones.
+    fn has_reading(&self) -> bool {
+        self.link == Link::Demo || self.read_at.is_some()
     }
 
     /// The item under the cursor, when the cursor shows.
@@ -376,20 +560,33 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(|event, _status, _window| match event {
+        let events = event::listen_with(|event, _status, _window| match event {
             iced::Event::Window(window::Event::Focused) => Some(Message::Focused),
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 Some(Message::Key(key, modifiers))
             }
             iced::Event::Mouse(mouse::Event::ButtonPressed(_)) => Some(Message::Pointer),
             _ => None,
-        })
+        });
+        if self.link == Link::Demo {
+            return events;
+        }
+        let worker = Subscription::run_with(self.device, worker::run).map(Message::Worker);
+        Subscription::batch([events, worker])
     }
 
     fn view(&self) -> Element<'_, Message> {
         let look = self.look;
+        let pending = self.pending();
         let page = match self.page {
-            Page::Overview => overview::view(look, &self.buds, self.anc_level, self.focus()),
+            Page::Overview if self.has_reading() => {
+                let marks = overview::Marks {
+                    focus: self.focus(),
+                    pending: &pending,
+                };
+                overview::view(look, &self.buds, self.anc_level, marks)
+            }
+            Page::Overview => self.connecting(),
             page => column![
                 ui::title(look, page.title()),
                 text("This page comes in a later step.").size(14).color(look.p.dim)
@@ -397,6 +594,7 @@ impl App {
             .spacing(12)
             .into(),
         };
+        let page = column![self.problem(), page].spacing(18);
         let p = look.p;
         let content = scrollable(
             container(container(page).max_width(860))
@@ -423,31 +621,90 @@ impl App {
         }
     }
 
+    /// The Overview before the first reading: connecting, or why it did not work.
+    fn connecting(&self) -> Element<'_, Message> {
+        let look = self.look;
+        let p = look.p;
+        let (headline, detail) = match &self.link {
+            Link::Failed {
+                kind: Kind::NotFound,
+                message,
+            } => ("Your buds are not connected", message.as_str()),
+            Link::Failed {
+                kind: Kind::Busy,
+                message,
+            } => ("The control channel is busy", message.as_str()),
+            Link::Failed { message, .. } => ("Something went wrong", message.as_str()),
+            _ => (
+                "Connecting to your buds…",
+                "budctl looks for the paired buds it supports and reads them.",
+            ),
+        };
+        let retry = matches!(self.link, Link::Failed { .. })
+            .then(|| container(ui::outline_button(look, "Try again", Message::Refresh)).width(180));
+        let words = column![
+            text(headline).size(20).font(look.bold()).color(p.fg),
+            text(detail).size(14).color(p.dim)
+        ]
+        .spacing(8);
+        column![
+            ui::title(look, "Overview"),
+            ui::panel(look, column![words].push(retry).spacing(18).into())
+        ]
+        .spacing(18)
+        .into()
+    }
+
+    /// A failure after the buds were read once: what went wrong, above the page.
+    fn problem(&self) -> Option<Element<'_, Message>> {
+        let Link::Failed { message, .. } = &self.link else {
+            return None;
+        };
+        // Before the first reading, the Overview says it already.
+        self.read_at?;
+        let look = self.look;
+        let p = look.p;
+        let content = row![
+            text(message.as_str()).size(14).color(p.err).width(Length::Fill),
+            container(ui::outline_button(look, "Try again", Message::Refresh)).width(140)
+        ]
+        .spacing(16)
+        .align_y(Alignment::Center);
+        Some(
+            container(content)
+                .padding([12, 16])
+                .width(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(p.surface.into()),
+                    border: Border {
+                        color: p.err,
+                        width: 1.0,
+                        radius: 14.0.into(),
+                    },
+                    ..container::Style::default()
+                })
+                .into(),
+        )
+    }
+
     fn sidebar(&self) -> Element<'_, Message> {
         let look = self.look;
         let p = look.p;
-        let connected = self.buds.connected;
-        let (light, state) = if connected {
-            (p.ok, "Connected")
-        } else {
-            (p.dim, "Not connected")
+        let (light, state) = match &self.link {
+            Link::Demo | Link::Live => (p.ok, "Connected"),
+            Link::Connecting => (p.dim, "Connecting…"),
+            Link::Failed { kind: Kind::Busy, .. } => (p.err, "Busy"),
+            Link::Failed { .. } if !self.buds.connected => (p.dim, "Not connected"),
+            Link::Failed { .. } => (p.err, "Error"),
         };
         let device = container(
             column![
                 text(self.buds.name.as_str()).size(16).font(look.bold()).color(p.fg),
-                row![
-                    ui::light(light),
-                    text(state).size(13).color(p.dim),
-                    space::horizontal(),
-                    ui::tag(look, "demo")
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-                ui::outline_button(
-                    look,
-                    if connected { "Disconnect" } else { "Connect" },
-                    Message::Connect(!connected)
-                ),
+                row![ui::light(light), text(state).size(13).color(p.dim), space::horizontal()]
+                    .push((self.link == Link::Demo).then(|| ui::tag(look, "demo")))
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                ui::outline_button(look, "Refresh", Message::Refresh),
             ]
             .spacing(12),
         )
@@ -523,15 +780,54 @@ fn anc_level(name: &str) -> Option<AncLevel> {
         .find(|level| level.name() == name)
 }
 
+/// The name to show for the EQ preset in use: a custom preset's own name (`custom-4` →
+/// "Custom1"), else the preset's name in words (`pure-bass` → "Pure bass").
+fn eq_name(current: Option<&str>, presets: Option<&EqPresets>) -> String {
+    let Some(current) = current else {
+        return "Unknown".to_owned();
+    };
+    let custom = current
+        .strip_prefix("custom-")
+        .and_then(|id| id.parse::<u8>().ok())
+        .and_then(|id| presets?.presets.iter().find(|p| p.custom && p.id == id))
+        .map(|preset| preset.name.clone());
+    custom.unwrap_or_else(|| {
+        let words = current.replace('-', " ");
+        let mut letters = words.chars();
+        letters
+            .next()
+            .map(|first| first.to_uppercase().chain(letters).collect())
+            .unwrap_or_default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use budctl_core::status::EqPreset;
     use iced::keyboard::key::Named;
     use std::fs;
     use std::path::Path;
+    use std::sync::mpsc::{self, Receiver};
 
+    /// With the made-up buds.
     fn app() -> App {
-        App::new(None, Font::DEFAULT)
+        App::new(None, Font::DEFAULT, None, true)
+    }
+
+    /// Talking to a worker that the test plays: the receiver gets what the app sends it.
+    fn live() -> (App, Receiver<Command>) {
+        let mut app = App::new(None, Font::DEFAULT, None, false);
+        let (worker, commands) = mpsc::channel();
+        let _ = app.update(Message::Worker(Event::Ready(worker)));
+        (app, commands)
+    }
+
+    fn reading() -> Reading {
+        Reading {
+            status: demo::buds().status,
+            eq: None,
+        }
     }
 
     /// Presses keys, given by name and separated by spaces: `j`, `G`, `Enter`, `Esc`.
@@ -715,6 +1011,106 @@ mod tests {
     }
 
     #[test]
+    fn live_buds_are_read_first() {
+        let (mut app, commands) = live();
+        assert!(matches!(commands.try_recv(), Ok(Command::Read)));
+        assert_eq!(app.link, Link::Connecting);
+        assert!(app.items().is_empty(), "nothing to move over before the first reading");
+        // A second refresh while the read is on its way sends nothing.
+        press(&mut app, "r");
+        assert!(commands.try_recv().is_err());
+
+        let _ = app.update(Message::Worker(Event::Found("realme Buds T310".to_owned())));
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        assert_eq!(app.link, Link::Live);
+        assert_eq!(app.buds.name, "realme Buds T310");
+        assert!(app.buds.connected);
+        assert_eq!(app.items().len(), 10);
+    }
+
+    #[test]
+    fn live_writes_wait_for_the_buds() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+
+        let _ = app.update(Message::Switch("game", true));
+        assert!(matches!(commands.try_recv(), Ok(Command::Switch("game", true))));
+        assert!(!switch(&app, "game"), "the switch changes when the buds say so");
+        assert_eq!(app.pending(), [Item::Switch("game")]);
+        // While it is on its way, the same switch takes no other write.
+        press(&mut app, "j j j Enter");
+        assert!(commands.try_recv().is_err());
+
+        let game = Switch {
+            key: "game",
+            label: "Game mode",
+            on: true,
+        };
+        let _ = app.update(Message::Worker(Event::Switch(game)));
+        assert!(switch(&app, "game"));
+        assert!(app.pending().is_empty());
+
+        let _ = app.update(Message::Noise(NoiseMode::Transparency));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::Noise(NoiseMode::Transparency))
+        ));
+        assert_eq!(mode(&app), "anc");
+        let now = NoiseControl {
+            mode: "transparency".to_owned(),
+            level: None,
+        };
+        let _ = app.update(Message::Worker(Event::Noise(now)));
+        assert_eq!(mode(&app), "transparency");
+    }
+
+    #[test]
+    fn failures_say_why_and_clear_the_write() {
+        let (mut app, commands) = live();
+        let _ = app.update(Message::Worker(Event::Failed {
+            kind: Kind::Busy,
+            message: "control channel busy".to_owned(),
+        }));
+        assert!(matches!(app.link, Link::Failed { kind: Kind::Busy, .. }));
+        assert!(app.problem().is_none(), "the Overview says it, not a banner");
+
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Refresh);
+        assert!(matches!(commands.try_recv(), Ok(Command::Read)));
+        assert_eq!(app.link, Link::Connecting);
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+
+        let _ = app.update(Message::Switch("dual", false));
+        let _ = app.update(Message::Worker(Event::Failed {
+            kind: Kind::NotFound,
+            message: "the buds closed the control link".to_owned(),
+        }));
+        assert!(app.pending().is_empty());
+        assert!(switch(&app, "dual"));
+        assert!(!app.buds.connected);
+        assert!(app.problem().is_some());
+    }
+
+    #[test]
+    fn eq_names() {
+        let presets = EqPresets {
+            current: Some("custom-4".to_owned()),
+            presets: vec![EqPreset {
+                name: "Custom1".to_owned(),
+                id: 4,
+                custom: true,
+                bands: Vec::new(),
+            }],
+            warnings: Vec::new(),
+        };
+        assert_eq!(eq_name(Some("custom-4"), Some(&presets)), "Custom1");
+        assert_eq!(eq_name(Some("custom-4"), None), "Custom 4");
+        assert_eq!(eq_name(Some("pure-bass"), Some(&presets)), "Pure bass");
+        assert_eq!(eq_name(None, None), "Unknown");
+    }
+
+    #[test]
     fn steps() {
         let abc = ['a', 'b', 'c'];
         assert_eq!(step(&abc, Some(0), Action::Left), None);
@@ -727,10 +1123,20 @@ mod tests {
     #[test]
     fn arguments() {
         let args = |list: &[&str]| parse_args(list.iter().map(|s| (*s).to_owned()));
-        assert!(matches!(args(&[]), Ok(Args::Run { theme: None })));
-        assert!(matches!(args(&["--theme", "x.json"]), Ok(Args::Run { theme: Some(_) })));
+        assert!(matches!(args(&[]), Ok(Args::Run(Options { demo: false, .. }))));
+        assert!(matches!(args(&["--demo"]), Ok(Args::Run(Options { demo: true, .. }))));
+        assert!(matches!(args(&["--debug"]), Ok(Args::Run(Options { debug: true, .. }))));
+        assert!(matches!(
+            args(&["--theme", "x.json"]),
+            Ok(Args::Run(Options { theme: Some(_), .. }))
+        ));
+        assert!(matches!(
+            args(&["--device", "88:0E:85:46:FE:5C"]),
+            Ok(Args::Run(Options { device: Some(_), .. }))
+        ));
         assert!(matches!(args(&["--help"]), Ok(Args::Help)));
         assert!(args(&["--theme"]).is_err());
+        assert!(args(&["--device", "nope"]).is_err());
         assert!(args(&["--bogus"]).is_err());
     }
 
@@ -743,7 +1149,7 @@ mod tests {
         let font = theme::system_font();
         let palette = std::env::var_os("BUDCTL_THEME").map(PathBuf::from);
         let on = |page: Page, keys: &str| {
-            let mut app = App::new(palette.clone(), font);
+            let mut app = App::new(palette.clone(), font, None, true);
             app.page = page;
             press(&mut app, keys);
             app
@@ -755,6 +1161,24 @@ mod tests {
         shots.push(("overview-full".to_owned(), 1240.0, on(Page::Overview, "")));
         shots.push(("overview-cursor".to_owned(), 800.0, on(Page::Overview, "j j j j")));
         shots.push(("keys".to_owned(), 800.0, on(Page::Overview, "?")));
+        let mut connecting = App::new(palette.clone(), font, None, false);
+        connecting.link = Link::Connecting;
+        shots.push(("connecting".to_owned(), 800.0, connecting));
+        let mut busy = App::new(palette.clone(), font, None, false);
+        busy.answer(Event::Failed {
+            kind: Kind::Busy,
+            message: "control channel busy: is another app connected?".to_owned(),
+        });
+        shots.push(("busy".to_owned(), 800.0, busy));
+        let (mut saving, _commands) = live();
+        saving.answer(Event::Read(Box::new(reading())));
+        saving.answer(Event::Failed {
+            kind: Kind::Failed,
+            message: "the buds did not answer: no reply to command 0x0403".to_owned(),
+        });
+        let _ = saving.update(Message::Switch("spatial", false));
+        let _ = saving.update(Message::Noise(NoiseMode::Off));
+        shots.push(("saving".to_owned(), 1240.0, saving));
         for (name, height, app) in shots {
             let settings = iced::Settings {
                 default_font: font,

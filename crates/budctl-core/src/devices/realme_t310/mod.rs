@@ -199,6 +199,11 @@ impl T310Session {
 }
 
 impl Session for T310Session {
+    /// Spec: realme_t310.md#buds-requests
+    fn serve(&mut self) -> Result<()> {
+        self.link.pump_until(Instant::now())
+    }
+
     fn status(&mut self) -> Result<Status> {
         let mut reads = Reads::default();
         let switches = self.read(
@@ -608,6 +613,23 @@ mod tests {
             tx(0x0205, 0x04, "04 01 02 03 04"),
             rx(0x8205, 0x04, "00 04 01 00 02 00 03 00 04 00"),
         ]
+    }
+
+    #[test]
+    fn serve_answers_the_buds_at_once() {
+        let mut steps = handshake();
+        // The time request, at Unix time 1750000000. Spec: realme_t310.md#buds-requests
+        steps.extend([rx(0x0500, 0x02, ""), tx(0x8500, 0x02, "00 80 E1 4E 68")]);
+        let script = Script::new(steps);
+        let mut session = open(&script).unwrap();
+        session.serve().unwrap();
+        script.assert_done();
+
+        let mut steps = handshake();
+        steps.push(Step::Close);
+        let script = Script::new(steps);
+        let mut session = open(&script).unwrap();
+        assert!(matches!(session.serve(), Err(Error::NotConnected(_))));
     }
 
     #[test]
