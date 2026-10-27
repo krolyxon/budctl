@@ -117,9 +117,9 @@ Exit codes:
 
 ## GUI
 
-- **Look:** the owner's shell, Aurora (`~/.dotfiles/.config/quickshell/aurora`), and its settings app in particular: a sidebar (title, the buds, pages by group) and pages of uppercase accent section labels over dense rows. Flat, square corners, 1 px lines, accent fills with background-colored text, lowercase words, JetBrains Mono Nerd Font at a 12 px base, Nerd Font glyphs as icons (written as `\u{…}` escapes, never pasted). `ui.rs` rebuilds Aurora's controls: switch rows, choices, buttons, level bars.
-- **Theme:** Aurora's matugen palette (`~/.cache/matugen/aurora.json`: `bg`, `fg`, `primary`, `surface`, `surfaceHigh`, `outlineVariant`, `surfaceVariantFg`, `err`), mapped to the same roles as Aurora's `Theme.qml`. `--theme <file>` or `~/.config/budctl/theme.json` take precedence; with no file, a built-in near-black palette with a red accent. The file is read again whenever the window gets focus.
-- **Input:** the mouse and touchpad come first. Vim-like keys are a layer on top: `j`/`k` move a cursor, `h`/`l` change the value under it. The cursor shows only after a key press. Keys Aurora's settings app already has mean the same here: `Ctrl+Tab`/`Ctrl+Shift+Tab` and `Ctrl+J`/`Ctrl+K` cycle pages, `Esc` closes.
+- **Look:** a sidebar (device card, pages) and pages of cards: battery rings, a segmented noise-control pill, rows of switches. The owner's reference is a screenshot of another buds app; match the look, never its code (rule 2).
+- **Theme:** a built-in dark palette with a red accent. Optionally, a matugen JSON file with the same keys as the owner's Aurora palette (`~/.cache/matugen/aurora.json`: `bg`, `fg`, `primary`, `surface`…), mapped to the same roles as Aurora's `Theme.qml`. It is read again whenever the window gets focus.
+- **Input:** the mouse and touchpad come first. Vim-like keys are a layer on top: `j`/`k` move a cursor, `h`/`l` change the value under it. The cursor shows only after a key press.
 - **Logic:** keys and clicks both become messages for one `update` function, which stays testable without a display. `iced_test` renders pages to PNG, so the look can be checked without the owner.
 
 ## Working with Claude
