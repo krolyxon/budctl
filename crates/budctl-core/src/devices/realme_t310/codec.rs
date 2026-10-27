@@ -3,7 +3,7 @@
 
 use crate::error::{Error, Result};
 use crate::reader::Reader;
-use crate::status::{Battery, Charge, Gesture, NoiseControl, Switch};
+use crate::status::{Battery, Charge, Gesture, NoiseControl, NoiseMode, Switch};
 
 /// Spec: realme_t310.md#bitmap
 pub(super) const HANDSHAKE: u16 = 0x0100;
@@ -19,6 +19,8 @@ pub(super) const GESTURES: u16 = 0x0108;
 pub(super) const NOISE_CONTROL: u16 = 0x010C;
 /// Spec: realme_t310.md#switches
 pub(super) const SWITCHES: u16 = 0x010D;
+/// Spec: realme_t310.md#anc-write
+pub(super) const NOISE_CONTROL_WRITE: u16 = 0x0404;
 /// Spec: realme_t310.md#eq-read
 pub(super) const EQ_PRESET: u16 = 0x010F;
 /// Spec: realme_t310.md#codec
@@ -293,6 +295,36 @@ pub(super) fn decode_noise_mode(reply: &[u8]) -> Result<NoiseControl> {
     })
 }
 
+/// The mask that selects `mode`, as written and as read back. Spec: realme_t310.md#anc-write
+pub(super) fn noise_write_mask(mode: NoiseMode) -> u32 {
+    match mode {
+        NoiseMode::Off => 0x01,
+        NoiseMode::Transparency => 0x02,
+        // Plain "noise cancelling on" is the deep level.
+        NoiseMode::Anc => 0x08,
+    }
+}
+
+/// `01 01 <mask>`: the noise-mode kind, then the mask in the fewest bytes (all fit in one).
+/// Spec: realme_t310.md#anc-write
+pub(super) fn noise_write_payload(mode: NoiseMode) -> Vec<u8> {
+    let mut payload = NOISE_MODE_QUERY.to_vec();
+    let mask = noise_write_mask(mode).to_le_bytes();
+    let used = mask.iter().rposition(|&b| b != 0).map_or(1, |last| last + 1);
+    payload.extend(mask.iter().take(used));
+    payload
+}
+
+/// The mask in a noise-control read reply. Spec: realme_t310.md#anc-read
+pub(super) fn decode_noise_mask(reply: &[u8]) -> Result<u32> {
+    noise_mask(reply, NOISE_MODE_QUERY, "the noise-control reply")
+}
+
+/// A write reply: `00` means accepted. Spec: realme_t310.md#writes
+pub(super) fn check_write_reply(reply: &[u8], what: &'static str) -> Result<()> {
+    ok_reply(reply, what).map(|_| ())
+}
+
 /// Spec: realme_t310.md#hold-cycle
 pub(super) fn decode_hold_cycle(reply: &[u8]) -> Result<Vec<String>> {
     let mask = noise_mask(reply, HOLD_CYCLE_QUERY, "the hold-cycle reply")?;
@@ -480,6 +512,28 @@ mod tests {
             decode_noise_mode(&hex("0E 01 01 08")),
             Err(Error::Rejected { status: 0x0E, .. })
         ));
+    }
+
+    #[test]
+    fn noise_control_write_payloads() {
+        assert_eq!(noise_write_payload(NoiseMode::Off), hex("01 01 01"));
+        assert_eq!(noise_write_payload(NoiseMode::Transparency), hex("01 01 02"));
+        assert_eq!(noise_write_payload(NoiseMode::Anc), hex("01 01 08"));
+        // The family's documented frame for "off" (realme_t310.md#frame-whole).
+        let frame =
+            crate::devices::realme_t310::frame::encode(NOISE_CONTROL_WRITE, 0x06, &noise_write_payload(NoiseMode::Off))
+                .unwrap();
+        assert_eq!(frame, hex("AA 0A 00 00 04 04 06 03 00 01 01 01"));
+    }
+
+    #[test]
+    fn write_replies() {
+        assert!(check_write_reply(&hex("00"), "the write").is_ok());
+        assert!(matches!(
+            check_write_reply(&hex("0E"), "the write"),
+            Err(Error::Rejected { status: 0x0E, .. })
+        ));
+        assert!(check_write_reply(&[], "the write").is_err());
     }
 
     #[test]

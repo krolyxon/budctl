@@ -6,7 +6,7 @@
 use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
-use crate::status::{Status, TouchControls};
+use crate::status::{NoiseControl, NoiseMode, Status, TouchControls};
 use crate::transport::Transport;
 
 pub mod realme_t310;
@@ -38,6 +38,13 @@ pub trait Session: Send {
     fn touch_controls(&mut self) -> Result<TouchControls> {
         Err(Error::Unsupported(
             "these buds have no touch-control settings budctl can read".to_owned(),
+        ))
+    }
+
+    /// Set the noise-control mode, then read it back. Returns the mode the buds now report.
+    fn set_noise_control(&mut self, _mode: NoiseMode) -> Result<NoiseControl> {
+        Err(Error::Unsupported(
+            "these buds have no noise-control setting budctl can change".to_owned(),
         ))
     }
 }

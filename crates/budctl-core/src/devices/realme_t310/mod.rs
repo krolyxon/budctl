@@ -9,7 +9,7 @@ use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
-use crate::status::{Status, TouchControls};
+use crate::status::{NoiseControl, NoiseMode, Status, TouchControls};
 use crate::transport::Transport;
 
 mod codec;
@@ -18,6 +18,12 @@ mod link;
 
 use codec::Commands;
 use link::Link;
+
+/// After a write is acked: how long to keep reading back, and the pause between reads.
+/// Spec: realme_t310.md#write-read-back
+const READ_BACK_WINDOW: Duration = Duration::from_secs(2);
+/// Spec: realme_t310.md#write-read-back
+const READ_BACK_PAUSE: Duration = Duration::from_millis(300);
 
 /// Spec: realme_t310.md#identity
 const BLUETOOTH_NAME: &str = "realme Buds T310";
@@ -163,6 +169,38 @@ impl Session for T310Session {
             firmware,
             warnings: reads.warnings,
         })
+    }
+
+    /// Spec: realme_t310.md#anc-write, #write-read-back
+    fn set_noise_control(&mut self, mode: NoiseMode) -> Result<NoiseControl> {
+        if !self.commands.allows(codec::NOISE_CONTROL_WRITE) || !self.commands.allows(codec::NOISE_CONTROL) {
+            return Err(Error::Unsupported(
+                "these buds do not offer noise-control settings".to_owned(),
+            ));
+        }
+        let reply = self
+            .link
+            .request(codec::NOISE_CONTROL_WRITE, &codec::noise_write_payload(mode))?;
+        codec::check_write_reply(&reply, "the noise-control change")?;
+
+        // Accepted is not applied: read back until the new mode shows, or give up.
+        let wanted = codec::noise_write_mask(mode);
+        let give_up = Instant::now() + READ_BACK_WINDOW;
+        loop {
+            let reply = self.link.request(codec::NOISE_CONTROL, &codec::NOISE_MODE_QUERY)?;
+            if codec::decode_noise_mask(&reply)? == wanted {
+                return codec::decode_noise_mode(&reply);
+            }
+            if Instant::now() >= give_up {
+                let now = codec::decode_noise_mode(&reply)?;
+                return Err(Error::NotApplied(format!(
+                    "the buds accepted noise control {}, but still report {}",
+                    mode.name(),
+                    now.mode
+                )));
+            }
+            self.link.pump_until(Instant::now() + READ_BACK_PAUSE)?;
+        }
     }
 
     fn touch_controls(&mut self) -> Result<TouchControls> {
@@ -408,5 +446,67 @@ mod tests {
         );
         assert_eq!(touch.hold_cycle.unwrap(), ["transparency", "anc"]);
         assert!(touch.warnings.is_empty());
+    }
+
+    #[test]
+    fn sets_noise_control_and_reads_it_back() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0404, 0x05, "01 01 02"),
+            rx(0x8404, 0x05, "00"),
+            // The buds announce the change; it needs no answer.
+            rx(0x0204, 0x10, "03 01 01 02"),
+            tx(0x010C, 0x06, "01 01"),
+            rx(0x810C, 0x06, "00 01 01 02"),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script)
+            .unwrap()
+            .set_noise_control(NoiseMode::Transparency)
+            .unwrap();
+        script.assert_done();
+        assert_eq!((now.mode.as_str(), now.level), ("transparency", None));
+    }
+
+    #[test]
+    fn reads_back_again_until_the_change_shows() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0404, 0x05, "01 01 01"),
+            rx(0x8404, 0x05, "00"),
+            tx(0x010C, 0x06, "01 01"),
+            rx(0x810C, 0x06, "00 01 01 08"),
+            tx(0x010C, 0x07, "01 01"),
+            rx(0x810C, 0x07, "00 01 01 01"),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script).unwrap().set_noise_control(NoiseMode::Off).unwrap();
+        script.assert_done();
+        assert_eq!(now.mode, "off");
+    }
+
+    #[test]
+    fn a_rejected_noise_control_change_is_not_read_back() {
+        let mut steps = handshake();
+        steps.extend([tx(0x0404, 0x05, "01 01 08"), rx(0x8404, 0x05, "0E")]);
+        let script = Script::new(steps);
+        let result = open(&script).unwrap().set_noise_control(NoiseMode::Anc);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Rejected { status: 0x0E, .. })));
+    }
+
+    #[test]
+    fn noise_control_is_not_written_without_its_bitmap_bit() {
+        let script = Script::new(vec![
+            tx(0x0100, 0x01, ""),
+            rx(0x8100, 0x01, "00"),
+            tx(0x0103, 0x02, ""),
+            rx(0x8103, 0x02, "00 12 3C 06"),
+            tx(0x0200, 0x03, ""),
+            rx(0x8200, 0x03, "00 00"),
+        ]);
+        let result = open(&script).unwrap().set_noise_control(NoiseMode::Off);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Unsupported(_))));
     }
 }

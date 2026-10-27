@@ -361,11 +361,12 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**Not sent by budctl yet.** Each write is enabled only after its hardware checkpoint passes (see the [roadmap](#roadmap)).
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*). The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
 - Accepted is not the same as applied. **Always read the state back** and compare it.
+- <a id="write-read-back"></a>**How budctl reads back** (budctl's own policy, not a protocol fact): it reads once right after the ack. If the old value is still there, it reads again every 300 ms for up to 2 s. If the value has still not changed, the command fails with exit 4 ("accepted but not applied"). A write that has its own timing, such as game mode ([§10.2](#switch-write)), says so in its section.
 
 <a id="anc-write"></a>
 ### 10.1 Noise control: `0x0404 01 01 <mask>`
@@ -374,6 +375,7 @@ Evidence: *vendor*
 - **Reply:** `0x8404 <status>`.
   - Status `0E` means no bud is in an ear (*buds4*). The T310 has no in-ear sensor (*t310*), so it may never send it.
 - **Check:** read `0x010C 01 01` again.
+- **On the T310** (*ours-2026-10-27*, W1): payloads `01 01 01`, `01 01 02` and `01 01 08` each got `0x8404 00` within 20-80 ms. The first read-back, about 200 ms later, already showed the new mask. The buds played their own voice prompts ("Normal Mode", "Transparent Mode", "Noise Cancelling"). They sent no event-`03` push for the change, although it was subscribed.
 
 <a id="switch-write"></a>
 ### 10.2 Switches: `0x0403 <id> <01|00>`
@@ -466,7 +468,7 @@ Evidence: *vendor*
 2. ~~The real bitmap bytes, the product-id reply and the offered events.~~ Answered at HW1; see [§5](#bitmap-t310) and [§6](#events-offered).
 3. Partly answered at HW1: no `0x0500`, but an unanswered `0x0501` with no reset ([§7](#buds-requests)). `F2`/`F4` were offered but not subscribed, so none arrived. What `0x0501` asks for is unknown.
 4. What "busy" looks like when the phone holds the channel: the connect is refused, the connect succeeds and the buds stay silent, or the buds drop the laptop's link. A local holder gives `EBUSY` (HW1). Until the phone case is tested, budctl also treats a silent handshake as "channel busy" (exit 3).
-5. The width of the noise-control value, and whether `08` reads back as deep.
+5. The width of the noise-control value: one byte so far, on reads and writes. `08` reads back as `08` after writing it (W1), but whether `08` is the deep level or plain "on" is still open (W2).
 6. ~~Whether the T310 answers id `1A` (wind).~~ It does (HW1). What id `05` means is still open: it reads `00`.
 7. How long after the game-mode ack the new value shows up in `0x010D`.
 8. The shape of the T310 gesture table is answered at HW1: six entries, `<side> <group> <act> <fn>`, double tap, triple tap and hold for each bud. The names of the EQ presets in realme Link are still open.
@@ -505,6 +507,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W1 `anc transparency`, `anc off`, `anc on` | pass | Acked, read back on the first try, and the buds' voice prompts matched. See [§10.1](#anc-write) |
 | 2026-10-27 | HW1 `list`, `status`, `--json status`, `touch`, not-connected path, busy path (local holder) | pass, with fixes | See below. Busy with the phone app as the holder is still untested |
 
 **HW1, 2026-10-27** (budctl 0.1.0, `--debug` output pasted by the owner):

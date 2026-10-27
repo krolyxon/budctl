@@ -29,6 +29,8 @@ pub enum Error {
     Timeout(String),
     /// The buds answered with a non-zero status byte.
     Rejected { what: String, status: u8 },
+    /// The buds accepted a write, but reading back shows the old value.
+    NotApplied(String),
     /// The buds sent something budctl cannot parse.
     Protocol(String),
     /// Any other operating-system error.
@@ -59,7 +61,7 @@ impl Error {
             | Error::Bluez(_)
             | Error::Os { .. } => Kind::NotFound,
             Error::ChannelBusy(_) => Kind::Busy,
-            Error::Timeout(_) | Error::Rejected { .. } | Error::Protocol(_) => Kind::Failed,
+            Error::Timeout(_) | Error::Rejected { .. } | Error::NotApplied(_) | Error::Protocol(_) => Kind::Failed,
         }
     }
 }
@@ -84,6 +86,7 @@ impl fmt::Display for Error {
             Error::Rejected { what, status } => {
                 write!(f, "the buds rejected {what} (status 0x{status:02X})")
             }
+            Error::NotApplied(msg) => f.write_str(msg),
             Error::Protocol(msg) => write!(f, "unexpected data from the buds: {msg}"),
             Error::Os { context, source } => write!(f, "{context}: {source}"),
         }

@@ -45,6 +45,25 @@ pub struct NoiseControl {
     pub level: Option<String>,
 }
 
+/// A noise-control mode to set. Levels come with W2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoiseMode {
+    Off,
+    Transparency,
+    Anc,
+}
+
+impl NoiseMode {
+    /// The name [`NoiseControl::mode`] uses for it.
+    pub fn name(self) -> &'static str {
+        match self {
+            NoiseMode::Off => "off",
+            NoiseMode::Transparency => "transparency",
+            NoiseMode::Anc => "anc",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Switch {
     /// Stable name used on the command line and in JSON (`game`, `dual`…).

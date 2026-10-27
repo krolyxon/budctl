@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use budctl_core::bluez::PairedDevice;
 use budctl_core::devices::Device;
-use budctl_core::status::{Charge, JSON_SCHEMA, Status, TouchControls};
+use budctl_core::status::{Charge, JSON_SCHEMA, NoiseControl, Status, TouchControls};
 use budctl_core::{Error, Found};
 use serde_json::Value;
 
@@ -183,5 +183,28 @@ pub fn touch(
         writeln!(out, "  Hold cycles through: {}", cycle.join(" → "))?;
     }
     warnings(out, &touch.warnings)?;
+    Ok(())
+}
+
+/// The noise-control mode after a change, as the buds report it on reading back.
+pub fn noise_control(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    now: &NoiseControl,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(
+            out,
+            Some((device, model)),
+            serde_json::json!({ "noise_control": serde_json::to_value(now)? }),
+        );
+    }
+    header(out, device, model)?;
+    match &now.level {
+        Some(level) => writeln!(out, "  Noise control  {} ({level})", now.mode)?,
+        None => writeln!(out, "  Noise control  {}", now.mode)?,
+    }
     Ok(())
 }

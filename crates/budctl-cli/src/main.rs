@@ -9,8 +9,9 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 use budctl_core::bt::BdAddr;
+use budctl_core::status::NoiseMode;
 use budctl_core::{Error, Kind};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// Control wireless earbuds from Linux, without the vendor app.
 #[derive(Parser)]
@@ -40,6 +41,28 @@ enum Command {
     Status,
     /// Touch controls (gesture table) of each bud.
     Touch,
+    /// Set noise control, then read it back.
+    Anc {
+        #[arg(value_enum)]
+        mode: AncArg,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum AncArg {
+    Off,
+    On,
+    Transparency,
+}
+
+impl From<AncArg> for NoiseMode {
+    fn from(arg: AncArg) -> Self {
+        match arg {
+            AncArg::Off => NoiseMode::Off,
+            AncArg::On => NoiseMode::Anc,
+            AncArg::Transparency => NoiseMode::Transparency,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -91,6 +114,10 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         Command::Touch => {
             let touch = session.touch_controls()?;
             output::touch(out, &device, model, &touch, cli.json)
+        }
+        Command::Anc { mode } => {
+            let now = session.set_noise_control(mode.into())?;
+            output::noise_control(out, &device, model, &now, cli.json)
         }
     }
 }
