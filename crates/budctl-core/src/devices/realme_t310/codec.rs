@@ -23,6 +23,8 @@ pub(super) const SWITCHES: u16 = 0x010D;
 pub(super) const NOISE_CONTROL_WRITE: u16 = 0x0404;
 /// Spec: realme_t310.md#switch-write
 pub(super) const SWITCH_WRITE: u16 = 0x0403;
+/// Spec: realme_t310.md#eq-write
+pub(super) const EQ_SELECT: u16 = 0x0406;
 /// Spec: realme_t310.md#eq-read
 pub(super) const EQ_PRESET: u16 = 0x010F;
 /// Spec: realme_t310.md#codec
@@ -385,6 +387,16 @@ pub(super) fn switch_write_payload(id: u8, on: bool) -> [u8; 2] {
     [id, u8::from(on)]
 }
 
+/// The id of a built-in EQ preset, by name. Spec: realme_t310.md#eq-read
+pub(super) fn eq_id(name: &str) -> Option<u8> {
+    EQ_PRESETS.iter().find(|(_, n)| *n == name).map(|(id, _)| *id)
+}
+
+/// The built-in EQ presets' names, in id order. Spec: realme_t310.md#eq-read
+pub(super) fn eq_names() -> Vec<&'static str> {
+    EQ_PRESETS.iter().map(|(_, name)| *name).collect()
+}
+
 /// Spec: realme_t310.md#eq-read
 pub(super) fn decode_eq(reply: &[u8]) -> Result<String> {
     let id = ok_reply(reply, "the EQ reply")?.u8()?;
@@ -556,6 +568,19 @@ mod tests {
         assert_eq!(switch_id("turbo"), None);
         assert_eq!(switch_write_payload(0x06, true), [0x06, 0x01]);
         assert_eq!(switch_write_payload(0x06, false), [0x06, 0x00]);
+    }
+
+    #[test]
+    fn eq_presets_by_name() {
+        assert_eq!(eq_id("pure-raw"), Some(0x00));
+        assert_eq!(eq_id("pure-bass"), Some(0x03));
+        assert_eq!(eq_id("custom-7"), None);
+        assert_eq!(eq_names(), ["pure-raw", "deep-bass", "pure-vocals", "pure-bass"]);
+        // Every preset reads back under the name it was selected by.
+        for name in eq_names() {
+            let reply = [0x00, eq_id(name).unwrap()];
+            assert_eq!(decode_eq(&reply).unwrap(), name);
+        }
     }
 
     #[test]

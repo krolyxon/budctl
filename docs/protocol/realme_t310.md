@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*). The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*). The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -398,6 +398,7 @@ Evidence: *vendor*
 
 - **Reply:** `0x8406 <status>`.
 - **Check:** read `0x010F` again.
+- **On the owner's T310** (*ours-2026-10-27*, W4): ids `00`-`03` were each acked with `00` within 20-40 ms and read back on the first try. The owner heard a clear difference between them. The names come from the vendor app; the owner did not check by ear that each sound matched its name.
 
 <a id="bass-write"></a>
 ### 10.4 Bass level: `0x041B FB 05 <level s8>`
@@ -511,6 +512,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W4 `eq pure-raw`, `deep-bass`, `pure-vocals`, `pure-bass` | pass | Acked and read back on the first try; the presets sound clearly different. See [§10.3](#eq-write) |
 | 2026-10-27 | W3 `game on`, `game off` | pass | Acked, and the 1 s read-back showed the change. No push or prompt. See [§10.2](#switch-write) |
 | 2026-10-27 | W2 `anc light`, `anc medium`, `anc deep`; level memory | pass | Each level acked and read back on the first try. The buds keep the level across a hold-gesture cycle. See [§10.1](#anc-write) |
 | 2026-10-27 | W1 `anc transparency`, `anc off`, `anc on` | pass | Acked, read back on the first try, and the buds' voice prompts matched. See [§10.1](#anc-write) |

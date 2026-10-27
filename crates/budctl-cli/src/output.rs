@@ -229,3 +229,19 @@ pub fn switch(
     writeln!(out, "  {}  {}", now.label, if now.on { "on" } else { "off" })?;
     Ok(())
 }
+
+/// The EQ preset after a change, as the buds report it on reading back.
+pub fn eq(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    now: &str,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(out, Some((device, model)), serde_json::json!({ "eq": now }));
+    }
+    header(out, device, model)?;
+    writeln!(out, "  EQ  {now}")?;
+    Ok(())
+}

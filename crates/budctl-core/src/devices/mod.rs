@@ -48,6 +48,13 @@ pub trait Session: Send {
         ))
     }
 
+    /// Select a built-in EQ preset by name, then read it back. Returns the preset now in use.
+    fn set_eq(&mut self, _preset: &str) -> Result<String> {
+        Err(Error::Unsupported(
+            "budctl cannot change the EQ on these buds".to_owned(),
+        ))
+    }
+
     /// Turn an on/off setting ([`Switch::key`]) on or off, then read it back.
     fn set_switch(&mut self, key: &str, _on: bool) -> Result<Switch> {
         Err(Error::Unsupported(format!("budctl cannot change {key} on these buds")))

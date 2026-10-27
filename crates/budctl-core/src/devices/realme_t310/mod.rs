@@ -260,6 +260,32 @@ impl Session for T310Session {
         )
     }
 
+    /// Built-in presets only; custom EQs come with W11. Spec: realme_t310.md#eq-write
+    fn set_eq(&mut self, preset: &str) -> Result<String> {
+        let Some(id) = codec::eq_id(preset) else {
+            return Err(Error::Usage(format!(
+                "no EQ preset called {preset}; these buds have: {}",
+                codec::eq_names().join(", ")
+            )));
+        };
+        if !self.commands.allows(codec::EQ_SELECT) || !self.commands.allows(codec::EQ_PRESET) {
+            return Err(Error::Unsupported("these buds do not offer EQ presets".to_owned()));
+        }
+        let reply = self.link.request(codec::EQ_SELECT, &[id])?;
+        codec::check_write_reply(&reply, "the EQ change")?;
+
+        self.read_back(
+            READ_BACK,
+            codec::EQ_PRESET,
+            &[],
+            |reply| {
+                let now = codec::decode_eq(reply)?;
+                Ok((now == preset, now))
+            },
+            |now| format!("the buds accepted EQ {preset}, but still report {now}"),
+        )
+    }
+
     /// Spec: realme_t310.md#switch-write, #write-read-back
     fn set_switch(&mut self, key: &str, on: bool) -> Result<Switch> {
         let Some(id) = codec::switch_id(key) else {
@@ -666,5 +692,33 @@ mod tests {
         let result = open(&script).unwrap().set_switch("game", false);
         script.assert_done();
         assert!(matches!(result, Err(Error::Rejected { status: 0x01, .. })));
+    }
+
+    #[test]
+    fn selects_an_eq_preset_and_reads_it_back() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0406, 0x05, "01"),
+            rx(0x8406, 0x05, "00"),
+            tx(0x010F, 0x06, ""),
+            rx(0x810F, 0x06, "00 01"),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script).unwrap().set_eq("deep-bass").unwrap();
+        script.assert_done();
+        assert_eq!(now, "deep-bass");
+    }
+
+    #[test]
+    fn an_unknown_eq_preset_is_a_usage_error() {
+        let mut steps = handshake();
+        steps.pop();
+        let script = Script::new(steps);
+        let result = open(&script).unwrap().set_eq("loudness");
+        script.assert_done();
+        match result {
+            Err(Error::Usage(message)) => assert!(message.contains("pure-raw, deep-bass, pure-vocals, pure-bass")),
+            other => panic!("expected a usage error, got {other:?}"),
+        }
     }
 }

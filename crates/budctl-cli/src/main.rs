@@ -46,6 +46,8 @@ enum Command {
         #[arg(value_enum)]
         mode: AncArg,
     },
+    /// Select an EQ preset (pure-raw, deep-bass, pure-vocals, pure-bass), then read it back.
+    Eq { preset: String },
     /// Turn game mode (low latency) on or off, then read it back.
     Game {
         #[arg(value_enum)]
@@ -135,6 +137,10 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         Command::Anc { mode } => {
             let now = session.set_noise_control(mode.into())?;
             output::noise_control(out, &device, model, &now, cli.json)
+        }
+        Command::Eq { ref preset } => {
+            let now = session.set_eq(preset)?;
+            output::eq(out, &device, model, &now, cli.json)
         }
         Command::Game { state } => {
             let now = session.set_switch("game", matches!(state, OnOff::On))?;
