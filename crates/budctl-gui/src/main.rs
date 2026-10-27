@@ -545,18 +545,20 @@ impl App {
                             .flat_map(|eq| eq.presets.iter())
                             .filter(|p| p.custom)
                     };
-                    let model = customs().next().cloned();
+                    // As the buds do: the bands of another preset, else the T310's own, all flat.
+                    let (bands, range) = customs().next().map_or_else(
+                        || (vec![50, 250, 1000, 4000, 8000, 16000], Some((-6, 6))),
+                        |model| (model.bands.iter().map(|b| b.hz).collect(), model.range),
+                    );
                     let id = customs().map(|p| p.id).max().map_or(4, |id| id.saturating_add(1));
-                    if let Some(model) = model {
-                        self.editing = Some(id);
-                        self.buds.set_custom(EqPreset {
-                            name,
-                            id,
-                            custom: true,
-                            bands: model.bands.iter().map(|b| EqBand { hz: b.hz, gain: 0 }).collect(),
-                            range: model.range,
-                        });
-                    }
+                    self.editing = Some(id);
+                    self.buds.set_custom(EqPreset {
+                        name,
+                        id,
+                        custom: true,
+                        bands: bands.into_iter().map(|hz| EqBand { hz, gain: 0 }).collect(),
+                        range,
+                    });
                 }
                 Command::DeleteEq(_) => {
                     let id = item_preset(item);
@@ -2094,6 +2096,18 @@ mod tests {
         let _ = app.update(Message::RenamePreset(gym));
         press(&mut app, "Esc");
         assert_eq!(app.prompt, None);
+
+        // With every custom preset gone, a new one still gets bands.
+        for id in [4, gym] {
+            let _ = app.update(Message::DeletePreset(id));
+            let _ = app.update(Message::ConfirmDelete(true));
+        }
+        assert_eq!(app.buds.custom_names().count(), 0);
+        let _ = app.update(Message::NewPreset);
+        let _ = app.update(Message::NameInput("Fresh".to_owned()));
+        let _ = app.update(Message::SubmitName);
+        let fresh = equalizer::in_use(&app.buds).unwrap();
+        assert_eq!((fresh.name.as_str(), fresh.bands.len()), ("Fresh", 6));
     }
 
     #[test]

@@ -116,12 +116,15 @@ pub fn view<'a>(
             )
         })
         .collect();
-    let editor: Element<'a, Message> = match edited(buds, editing) {
-        Some(preset) => bands(look, preset, draft, marks),
-        None => text("Use the pencil on one of your presets to change its bands.")
-            .size(13)
-            .color(p.dim)
-            .into(),
+    let editor: Option<Element<'a, Message>> = match edited(buds, editing) {
+        Some(preset) => Some(bands(look, preset, draft, marks)),
+        None if eq.presets.iter().any(|p| p.custom) => Some(
+            text("Use the pencil on one of your presets to change its bands.")
+                .size(13)
+                .color(p.dim)
+                .into(),
+        ),
+        None => None,
     };
     column![title, ui::card(look, rows), new_preset(look, marks), editor]
         .spacing(18)
@@ -134,7 +137,7 @@ fn new_preset<'a>(look: Look, marks: Marks) -> Element<'a, Message> {
         .pending
         .contains(&Item::NewPreset)
         .then(|| text("Creating…").size(13).color(look.p.icon));
-    let about = text("A new preset starts flat, with the bands of your other presets, and is put to use.")
+    let about = text("A new preset starts flat and is put to use.")
         .size(13)
         .color(look.p.dim)
         .width(Length::Fill);

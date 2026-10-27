@@ -518,6 +518,7 @@ Evidence: *vendor*
   - <a id="custom-eq-delete"></a>**W11e, delete** (`03`), wanted by the owner (2026-10-28): `budctl eq delete custom-<id>` reads the list and sends the preset as listed, with action `03`: the write has the same layout for every action. A preset the buds do not have is refused before anything is sent.
     - **Check:** read the list again, as for [read-back](#write-read-back). It must have one preset fewer, and none left with the deleted one's name and bands. Ids can be renumbered after a delete, so they prove nothing.
     - **Unknown:** which EQ the buds use after the preset in use is deleted. budctl reads the EQ again after a delete.
+    - **On the owner's T310** (*ours-2026-10-28*, W11e): the delete of Gym (id `05`, not in use) went out byte for byte as the expected frame below, and the buds answered `0x8418 00 05` within 50 ms. The list read 150 ms after the ack was `00 00`: no custom preset left. The EQ in use (deep-bass) did not change. The owner had deleted Custom1 (id `04`) before, from budctl-gui.
     - **Expected frame** (*derived*), for `eq delete custom-5` on the owner's list after W11d (Gym, flat), with seq `06`: `AA 22 00 00 18 04 06 1B 00 03 FA 06 05 03 47 79 6D 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00`.
   - **With no custom preset left**, a create has nothing to copy. It then uses the layout of the owner's T310 (*ours-2026-10-27*): range `FA 06` and bands at 50, 250, 1000, 4000, 8000 and 16000 Hz.
 
@@ -575,6 +576,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-28 | W11e `eq delete custom-5` | pass | The delete matched the derived frame byte for byte, and was acked with `00 05`. The list read back at once is empty. Deleting the preset in use is still untested. See [§10.9](#custom-eq-delete) |
 | 2026-10-28 | W11d `eq rename custom-5 Gym` | pass | The save with the new name matched the derived frame byte for byte, and was acked with `00 05`. The list read back at once has id `05` named Gym, bands unchanged, in use. See [§10.9](#custom-eq-rename) |
 | 2026-10-28 | W11c `eq new Test` | pass | The create frame matched the derived one byte for byte, and was acked with `00 05`. The list read back at once has Test as id `05`, flat, and in use. See [§10.9](#custom-eq-create) |
 | 2026-10-27 | G5 `budctl-gui --debug`, Gestures page: left triple tap by dropdown and by `h`/`l`, transparency into the hold cycle and out | pass (protocol) | Every `0x0401` write (`06`, `03`, `0B`, `03`, `06`, then `05` to restore it) and both `0x0404 02 01` writes (`0B`, `09`) were acked and read back on the first try. Keys pressed during a write went out one by one as each write finished, and the last one was read back. A session closed after 10 s idle; the next pick opened a new one and wrote at once |
