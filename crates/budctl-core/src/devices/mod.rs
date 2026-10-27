@@ -6,7 +6,7 @@
 use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
-use crate::status::{BudFit, NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
+use crate::status::{NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
 use crate::transport::Transport;
 
 pub mod realme_t310;
@@ -64,20 +64,6 @@ pub trait Session: Send {
     /// Turn an on/off setting ([`Switch::key`]) on or off, then read it back.
     fn set_switch(&mut self, key: &str, _on: bool) -> Result<Switch> {
         Err(Error::Unsupported(format!("budctl cannot change {key} on these buds")))
-    }
-
-    /// Run a fit test and wait for its result. Both buds must be in the ears.
-    fn fit_test(&mut self) -> Result<Vec<BudFit>> {
-        Err(Error::Unsupported(
-            "these buds have no fit test budctl can run".to_owned(),
-        ))
-    }
-
-    /// Stop a fit test that is still running.
-    fn stop_fit_test(&mut self) -> Result<()> {
-        Err(Error::Unsupported(
-            "these buds have no fit test budctl can run".to_owned(),
-        ))
     }
 
     /// Set the noise-control modes a hold steps through (`off`, `transparency`, `anc`), then

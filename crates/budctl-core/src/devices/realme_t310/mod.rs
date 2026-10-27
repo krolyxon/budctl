@@ -9,9 +9,7 @@ use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
-use crate::status::{
-    BudFit, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls,
-};
+use crate::status::{GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls};
 use crate::transport::Transport;
 
 mod codec;
@@ -366,15 +364,6 @@ impl Session for T310Session {
             hold_cycle,
             warnings: reads.warnings,
         })
-    }
-
-    /// The T310 acks `0x0405` but runs no test, so budctl does not send it.
-    /// Spec: realme_t310.md#fit-test
-    fn fit_test(&mut self) -> Result<Vec<BudFit>> {
-        Err(Error::Unsupported(
-            "the T310 accepts the fit-test command but runs no test (no sound, no result), so budctl does not offer it"
-                .to_owned(),
-        ))
     }
 
     /// Spec: realme_t310.md#hold-cycle-write, #write-read-back
@@ -1023,16 +1012,5 @@ mod tests {
         let result = open(&script).unwrap().set_hold_cycle(&["anc"]);
         script.assert_done();
         assert!(matches!(result, Err(Error::Usage(_))));
-    }
-
-    #[test]
-    fn the_fit_test_is_refused_and_nothing_is_sent() {
-        let mut steps = handshake();
-        steps.pop();
-        let script = Script::new(steps);
-        let mut session = open(&script).unwrap();
-        assert!(matches!(session.fit_test(), Err(Error::Unsupported(_))));
-        assert!(matches!(session.stop_fit_test(), Err(Error::Unsupported(_))));
-        script.assert_done();
     }
 }

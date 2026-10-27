@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*); [§10.6](#gesture-write) touch controls (W8, verified *ours-2026-10-27*); [§10.7](#hold-cycle-write) the hold cycle (W9, verified *ours-2026-10-27*). The fit test ([§10.8](#fit-test), W10) is acked but does nothing on the T310, so budctl does not send it. Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*); [§10.6](#gesture-write) touch controls (W8, verified *ours-2026-10-27*); [§10.7](#hold-cycle-write) the hold cycle (W9, verified *ours-2026-10-27*). The fit test ([§10.8](#fit-test), W10) is acked but does nothing on the T310; it is dropped. Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -464,7 +464,7 @@ Evidence: *buds4*
 - **Result:** arrives as push `04 (<dev> <result>)…`, where `1` = good, `0` = average and `6` = poor. The push needs event `04` subscribed.
 - **Timing:** about 8.6 s on Buds 4. Both buds must be in the ears.
 - **The T310 runs no test** (*ours-2026-10-27*, W10). With both buds in the owner's ears, `AA 08 00 00 05 04 05 01 00 01` (start) got `0x8405 00` within 19 ms. Then nothing came for 15 s: no push of any kind, and no sound. `0x0405 00` (stop) got `0x8405 00`, but after 417 ms, where other writes take about 20 ms. Event `04` was subscribed and acked. Bit 9 of the bitmap is set, so the bitmap overstates what the T310 does here.
-- **budctl does not send it.** `budctl fit-test` on the T310 is refused before anything is sent (exit 1). It could return if a realme Link capture shows a fit test on the T310 ([open questions](#open)). The first W10 implementation is in git history (commit `8fdeefb`): it waited 15 s for the event-`04` push and sent stop if none came.
+- **budctl does not send it.** The owner dropped the fit test (2026-10-27), and budctl has no `fit-test` command. The W10 implementation is in git history (commit `8fdeefb`): it waited 15 s for the event-`04` push and sent stop if none came.
 
 <a id="custom-eq"></a>
 ### 10.9 Custom EQ: list `0x0122`, write `0x0418`
@@ -500,7 +500,6 @@ Evidence: *vendor*
 9. Whether the minimum 200 ms spacing between sends is needed.
 10. Why the T310 ignores `0x0124` although bit 38 is set ([§9.7](#bass-read)). Needs a realme Link capture before W6.
 11. How to turn noise cancelling on at the level the buds saved, without forcing deep ([§10.1](#anc-write)). Needs a realme Link snoop.
-12. Whether realme Link offers a fit test for the T310 at all. The T310 acks `0x0405 01` but runs no test ([§10.8](#fit-test)). If the app has one, a snoop of it would show what the app sends.
 
 <a id="roadmap"></a>
 ## 13. Roadmap and hardware checkpoints
@@ -524,7 +523,7 @@ The owner runs each checkpoint with `--debug` and pastes the output. Results go 
 | W7 | `find` |
 | W8 | `touch <side> <gesture> <action>` (`--dry-run` first) |
 | W9 | `touch cycle` |
-| W10 | `fit-test`: acked but does nothing on the T310; parked ([§10.8](#fit-test)) |
+| W10 | ~~`fit-test`~~: dropped, the T310 runs no test ([§10.8](#fit-test)) |
 | W11 | custom EQ (create, then save, then delete) |
 
 Ask for an Android HCI snoop of realme Link before W11, and for any write that does nothing.
@@ -534,7 +533,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
-| 2026-10-27 | W10 `fit-test` | fail: no test | Start and stop were acked, but no result push and no sound came in 15 s. budctl now refuses the fit test on the T310. See [§10.8](#fit-test) |
+| 2026-10-27 | W10 `fit-test` | fail: no test | Start and stop were acked, but no result push and no sound came in 15 s. The owner dropped the fit test. See [§10.8](#fit-test) |
 | 2026-10-27 | W9 `touch cycle off transparency anc`, then `off anc` | pass | Masks `0B` and `09` were acked and read back on the first try. The owner confirmed the new cycle with the hold gesture. The cycle is now off → anc. See [§10.7](#hold-cycle-write) |
 | 2026-10-27 | W8 `touch left triple-tap volume-up` (`--dry-run`, then sent), then `previous` | pass | The dry run's payload matched the derived frame. Both writes were acked and read back on the first try, 600 ms after the ack. The ack echoes the old table, cut short. The owner confirmed that the new gesture works. The left triple tap is now `previous`. See [§10.6](#gesture-write) |
 | 2026-10-27 | W7 `find start --yes`, `find stop` | pass | Both acked. Both buds rang, kept ringing after budctl disconnected, and stopped on `find stop`. See [§10.5](#find) |

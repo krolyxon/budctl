@@ -81,7 +81,7 @@ budctl --json status             # machine-readable output for scripts/status ba
 budctl --debug ...               # hex-dump every frame sent/received (stderr)
 ```
 
-Write commands (`anc`, `eq`, `game`, `set`, `bass`, `touch <side> …`, `find`, `fit-test`, custom EQ) are added one at a time, following rule 4. The plan is in `docs/protocol/realme_t310.md#roadmap`.
+Write commands (`anc`, `eq`, `game`, `set`, `bass`, `touch <side> …`, `find`, custom EQ) are added one at a time, following rule 4. The plan is in `docs/protocol/realme_t310.md#roadmap`.
 
 Exit codes:
 
@@ -107,7 +107,7 @@ Exit codes:
    7. find
    8. touch controls
    9. hold cycle
-   10. fit test
+   10. ~~fit test~~ (dropped: the T310 acks it but runs no test)
    11. custom EQ
 4. **GUI**: Quickshell/Aurora via `--json`, or a Rust GUI on top of the same core.
 5. **More devices**: as acquired.

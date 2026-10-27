@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use budctl_core::bluez::PairedDevice;
 use budctl_core::devices::Device;
-use budctl_core::status::{BudFit, Charge, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls};
+use budctl_core::status::{Charge, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls};
 use budctl_core::{Error, Found};
 use serde_json::Value;
 
@@ -291,39 +291,6 @@ pub fn eq(
     }
     header(out, device, model)?;
     writeln!(out, "  EQ  {now}")?;
-    Ok(())
-}
-
-/// The fit-test result of each bud.
-pub fn fit_test(
-    out: &mut impl Write,
-    device: &PairedDevice,
-    model: &dyn Device,
-    buds: &[BudFit],
-    as_json: bool,
-) -> Result<(), Failure> {
-    if as_json {
-        return json(out, Some((device, model)), serde_json::json!({ "fit": buds }));
-    }
-    header(out, device, model)?;
-    for bud in buds {
-        writeln!(out, "  {:<6} {}", bud.side, bud.fit)?;
-    }
-    Ok(())
-}
-
-/// After `fit-test stop`: the buds acked.
-pub fn fit_test_stopped(
-    out: &mut impl Write,
-    device: &PairedDevice,
-    model: &dyn Device,
-    as_json: bool,
-) -> Result<(), Failure> {
-    if as_json {
-        return json(out, Some((device, model)), serde_json::json!({ "fit_test": "stopped" }));
-    }
-    header(out, device, model)?;
-    writeln!(out, "  Fit test stopped.")?;
     Ok(())
 }
 
