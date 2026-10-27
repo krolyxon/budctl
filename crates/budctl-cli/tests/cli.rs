@@ -35,6 +35,7 @@ fn eq_new_and_rename_check_the_name_before_connecting() {
         &["eq", "new", "a\tb"],
         &["eq", "rename", "custom-5"],
         &["eq", "rename", "custom-5", ""],
+        &["eq", "delete"],
     ] {
         let out = budctl(args);
         assert_eq!(out.status.code(), Some(1), "{args:?}");

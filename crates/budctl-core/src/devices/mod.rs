@@ -100,6 +100,14 @@ pub trait Session: Send {
         )))
     }
 
+    /// Delete a custom EQ preset (`custom-<id>`). Returns the custom presets left, as the buds
+    /// list them afterwards: their ids can change.
+    fn delete_custom_eq(&mut self, preset: &str) -> Result<Vec<EqPreset>> {
+        Err(Error::Unsupported(format!(
+            "budctl cannot delete {preset} on these buds"
+        )))
+    }
+
     /// Set the bass level. Only the ack can be checked when the buds cannot report the level.
     fn set_bass_level(&mut self, _level: i8) -> Result<()> {
         Err(Error::Unsupported(

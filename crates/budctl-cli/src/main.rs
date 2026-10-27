@@ -69,7 +69,7 @@ enum Command {
     ///
     /// For a custom preset, `<hz>=<gain>` pairs change those bands' gains (dB), then save and
     /// select it: `budctl eq custom-4 50=+3 16000=-2`. `budctl eq new <name>` creates a preset,
-    /// `budctl eq rename custom-<id> <name>` renames one.
+    /// `budctl eq rename custom-<id> <name>` renames one, `budctl eq delete custom-<id>` deletes one.
     #[command(args_conflicts_with_subcommands = true)]
     Eq {
         #[command(subcommand)]
@@ -129,6 +129,11 @@ enum EqCommand {
         /// Its new name, 1 to 16 bytes.
         #[arg(value_parser = parse_name)]
         name: String,
+    },
+    /// Delete a custom preset, then read the list back. Its bands are lost.
+    Delete {
+        /// The preset, as `budctl eq` lists it: custom-<id>.
+        preset: String,
     },
 }
 
@@ -305,6 +310,13 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let now = session.rename_custom_eq(preset, name)?;
             output::renamed_eq(out, &device, model, &now, cli.json)
         }
+        Command::Eq {
+            action: Some(EqCommand::Delete { ref preset }),
+            ..
+        } => {
+            let left = session.delete_custom_eq(preset)?;
+            output::deleted_eq(out, &device, model, preset, &left, cli.json)
+        }
         Command::Eq { preset: None, .. } => {
             let presets = session.eq_presets()?;
             output::eq_presets(out, &device, model, &presets, cli.json)
@@ -408,6 +420,10 @@ mod tests {
         assert!(matches!(
             parse(&["eq", "new", "Gym mix"]),
             Command::Eq { action: Some(EqCommand::New { name }), .. } if name == "Gym mix"
+        ));
+        assert!(matches!(
+            parse(&["eq", "delete", "custom-5"]),
+            Command::Eq { action: Some(EqCommand::Delete { preset }), .. } if preset == "custom-5"
         ));
         assert!(matches!(
             parse(&["eq", "rename", "custom-5", "Gym"]),

@@ -373,6 +373,30 @@ pub fn created_eq(
     Ok(())
 }
 
+/// The custom presets left after deleting one, as the buds list them.
+pub fn deleted_eq(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    deleted: &str,
+    left: &[EqPreset],
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(
+            out,
+            Some((device, model)),
+            serde_json::json!({ "deleted": deleted, "presets": left }),
+        );
+    }
+    header(out, device, model)?;
+    writeln!(out, "  Deleted  {deleted}")?;
+    for preset in left {
+        writeln!(out, "  Left     custom-{} \"{}\"", preset.id, preset.name)?;
+    }
+    Ok(())
+}
+
 /// A custom preset just renamed, as the buds list it.
 pub fn renamed_eq(
     out: &mut impl Write,

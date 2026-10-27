@@ -64,6 +64,13 @@ pub(super) const CUSTOM_EQ_WRITE: u16 = 0x0418;
 const CUSTOM_EQ_SAVE: u8 = 0x02;
 /// The `0x0418` action that creates a preset; the buds give it an id. Spec: realme_t310.md#custom-eq
 const CUSTOM_EQ_CREATE: u8 = 0x01;
+/// The `0x0418` action that deletes a preset. Spec: realme_t310.md#custom-eq
+const CUSTOM_EQ_DELETE: u8 = 0x03;
+/// The range and bands of the owner's T310's custom presets: what a new preset gets when there is
+/// none to copy. Spec: realme_t310.md#custom-eq-create
+const T310_CUSTOM_RANGE: (i8, i8) = (-6, 6);
+/// Spec: realme_t310.md#custom-eq-create
+const T310_CUSTOM_BANDS: [u16; 6] = [50, 250, 1000, 4000, 8000, 16000];
 /// The most custom presets the buds keep. Spec: realme_t310.md#custom-eq
 pub(super) const CUSTOM_EQ_MAX: usize = 3;
 /// The longest preset name budctl writes, in bytes. budctl's own limit: the name's length is one
@@ -622,17 +629,37 @@ pub(super) fn custom_eq_name(name: &str) -> Result<Vec<u8>> {
     Ok(name.as_bytes().to_vec())
 }
 
-/// A new preset called `name`: the range and the bands of `model`, a preset the buds have, with
-/// every gain at 0, and id `00` for the buds to replace. Spec: realme_t310.md#custom-eq-create
-pub(super) fn new_custom_eq(name: &str, model: &CustomEq) -> Result<CustomEq> {
+/// A new preset called `name`: the range and the bands of `model`, a preset the buds have, else
+/// the T310's own, with every gain at 0, and id `00` for the buds to replace.
+/// Spec: realme_t310.md#custom-eq-create
+pub(super) fn new_custom_eq(name: &str, model: Option<&CustomEq>) -> Result<CustomEq> {
+    let ((min, max), bands): ((i8, i8), Vec<u16>) = match model {
+        Some(model) => ((model.min, model.max), model.bands.iter().map(|b| b.hz).collect()),
+        None => (T310_CUSTOM_RANGE, T310_CUSTOM_BANDS.to_vec()),
+    };
     Ok(CustomEq {
         selected: false,
-        min: model.min,
-        max: model.max,
+        min,
+        max,
         id: 0x00,
         name: custom_eq_name(name)?,
-        bands: model.bands.iter().map(|b| EqBand { hz: b.hz, gain: 0 }).collect(),
+        bands: bands.into_iter().map(|hz| EqBand { hz, gain: 0 }).collect(),
     })
+}
+
+/// `03 <min> <max> <id> <nameLen> <name> <bands> …`: delete the preset, sent as the list holds it.
+/// Spec: realme_t310.md#custom-eq-delete
+pub(super) fn custom_eq_delete_payload(preset: &CustomEq) -> Result<Vec<u8>> {
+    custom_eq_payload(CUSTOM_EQ_DELETE, preset)
+}
+
+/// Whether a list read after deleting `gone` from `before` shows it gone: one preset fewer, and
+/// none left with its name and bands. Ids can change, so they prove nothing.
+/// Spec: realme_t310.md#custom-eq-delete
+pub(super) fn deleted(before: &[CustomEq], gone: &CustomEq, now: &[CustomEq]) -> bool {
+    let same = |p: &CustomEq| p.name == gone.name && p.bands == gone.bands;
+    let left_before = before.iter().filter(|p| same(p)).count().saturating_sub(1);
+    now.len() + 1 == before.len() && now.iter().filter(|p| same(p)).count() == left_before
 }
 
 /// The preset under a new name, and nothing else changed: saved with [`custom_eq_save_payload`],
@@ -1211,7 +1238,9 @@ mod tests {
     #[test]
     fn creates_a_flat_copy_of_the_owners_preset() {
         let list = decode_custom_eq_list(&hex(OWNER_CUSTOM_EQS)).unwrap();
-        let new = new_custom_eq("Test", &list[0]).unwrap();
+        let new = new_custom_eq("Test", list.first()).unwrap();
+        // With no preset to copy, the T310's own layout: the same, here.
+        assert_eq!(new_custom_eq("Test", None).unwrap(), new);
         assert_eq!((new.id, new.min, new.max), (0x00, -6, 6));
         assert!(new.bands.iter().all(|b| b.gain == 0));
         let hz: Vec<u16> = new.bands.iter().map(|b| b.hz).collect();
@@ -1250,6 +1279,26 @@ mod tests {
                  32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00")
         );
         assert!(renamed(test, "").is_err());
+    }
+
+    #[test]
+    fn deletes_the_owners_preset_as_listed() {
+        let list = decode_custom_eq_list(&hex(OWNER_AFTER_W11C)).unwrap();
+        let mut gym = list.iter().find(|p| p.id == 0x05).unwrap().clone();
+        gym.name = b"Gym".to_vec();
+        // Spec: realme_t310.md#custom-eq-delete (the expected frame, with seq 06)
+        let frame =
+            crate::devices::realme_t310::frame::encode(CUSTOM_EQ_WRITE, 0x06, &custom_eq_delete_payload(&gym).unwrap())
+                .unwrap();
+        assert_eq!(
+            frame,
+            hex("AA 22 00 00 18 04 06 1B 00 03 FA 06 05 03 47 79 6D 06 \
+                 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00")
+        );
+        let before = vec![list[0].clone(), gym.clone()];
+        assert!(deleted(&before, &gym, &before[..1]));
+        assert!(!deleted(&before, &gym, &before));
+        assert!(!deleted(&before, &gym, &before[1..]), "the wrong one went");
     }
 
     #[test]

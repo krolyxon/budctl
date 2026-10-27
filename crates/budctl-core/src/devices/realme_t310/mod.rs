@@ -398,12 +398,7 @@ impl Session for T310Session {
             return Err(Error::Usage(format!("a custom preset is called {name} already")));
         }
         // The new preset copies the bands the buds use: the vendor's defaults do not hold here.
-        let Some(model) = list.first() else {
-            return Err(Error::Usage(
-                "budctl copies a new preset's bands from one the buds have, and these buds have none".to_owned(),
-            ));
-        };
-        let new = codec::new_custom_eq(name, model)?;
+        let new = codec::new_custom_eq(name, list.first())?;
         let reply = self
             .link
             .request(codec::CUSTOM_EQ_WRITE, &codec::custom_eq_create_payload(&new)?)?;
@@ -465,6 +460,40 @@ impl Session for T310Session {
         )?;
         now.map(|p| p.preset())
             .ok_or_else(|| Error::Protocol(format!("{preset} vanished from the list")))
+    }
+
+    /// Spec: realme_t310.md#custom-eq-delete, #write-read-back
+    fn delete_custom_eq(&mut self, preset: &str) -> Result<Vec<EqPreset>> {
+        let Some(id) = codec::custom_eq_id(preset) else {
+            return Err(Error::Usage(format!(
+                "{preset} is not a custom preset; those are named custom-<id>, as `budctl eq` lists them"
+            )));
+        };
+        if !self.commands.allows(codec::CUSTOM_EQ_WRITE) || !self.commands.allows(codec::CUSTOM_EQ_LIST) {
+            return Err(Error::Unsupported(
+                "these buds do not offer custom EQ presets".to_owned(),
+            ));
+        }
+        // The delete carries the whole preset, as the list holds it just now.
+        let list = codec::decode_custom_eq_list(&self.link.request(codec::CUSTOM_EQ_LIST, &[])?)?;
+        let Some(gone) = list.iter().find(|p| p.id == id).cloned() else {
+            return Err(Error::Usage(format!("these buds have no {preset}")));
+        };
+        let reply = self
+            .link
+            .request(codec::CUSTOM_EQ_WRITE, &codec::custom_eq_delete_payload(&gone)?)?;
+        codec::check_write_reply(&reply, "deleting the custom EQ")?;
+        let left = self.read_back(
+            READ_BACK,
+            codec::CUSTOM_EQ_LIST,
+            &[],
+            |reply| {
+                let now = codec::decode_custom_eq_list(reply)?;
+                Ok((codec::deleted(&list, &gone, &now), now))
+            },
+            |_| format!("the buds accepted deleting {preset}, but still list it"),
+        )?;
+        Ok(left.iter().map(codec::CustomEq::preset).collect())
     }
 
     /// Spec: realme_t310.md#bass-write
@@ -1351,12 +1380,45 @@ mod tests {
     }
 
     #[test]
+    fn deletes_a_custom_preset_and_reads_the_list_back() {
+        const LIST: &str = "00 02 00 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 06 FA 00 03 E8 03 03 A0 0F 04 40 1F 06 80 3E 06 \
+             01 FA 06 05 03 47 79 6D 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+        const AFTER: &str =
+            "00 01 00 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 06 FA 00 03 E8 03 03 A0 0F 04 40 1F 06 80 3E 06";
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0122, 0x05, ""),
+            rx(0x8122, 0x05, LIST),
+            tx(
+                0x0418,
+                0x06,
+                "03 FA 06 05 03 47 79 6D 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00",
+            ),
+            rx(0x8418, 0x06, "00 05"),
+            tx(0x0122, 0x07, ""),
+            rx(0x8122, 0x07, AFTER),
+        ]);
+        let script = Script::new(steps);
+        let left = open(&script).unwrap().delete_custom_eq("custom-5").unwrap();
+        script.assert_done();
+        let names: Vec<&str> = left.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Custom1"]);
+
+        // A preset the buds do not have is refused before anything is written.
+        let mut steps = handshake();
+        steps.extend([tx(0x0122, 0x05, ""), rx(0x8122, 0x05, LIST)]);
+        let script = Script::new(steps);
+        let missing = open(&script).unwrap().delete_custom_eq("custom-7");
+        script.assert_done();
+        assert!(matches!(missing, Err(Error::Usage(_))));
+    }
+
+    #[test]
     fn refuses_a_fourth_preset_or_a_taken_name_before_writing() {
         let one = "00 FA 06 04 07 43 75 73 74 6F 6D 31 00";
         for (list, name) in [
             (format!("00 03 {one} {one} {one}"), "Test"),
             (format!("00 01 {one}"), "Custom1"),
-            ("00 00".to_owned(), "Test"),
         ] {
             let mut steps = handshake();
             steps.extend([tx(0x0122, 0x05, ""), rx(0x8122, 0x05, &list)]);
