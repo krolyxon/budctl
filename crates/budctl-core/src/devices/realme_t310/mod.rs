@@ -9,7 +9,9 @@ use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
-use crate::status::{GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls};
+use crate::status::{
+    EqPresets, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls,
+};
 use crate::transport::Transport;
 
 mod codec;
@@ -214,8 +216,8 @@ impl Session for T310Session {
         )?;
         let battery = self.read(&mut reads, "battery", codec::BATTERY, &[], codec::decode_battery)?;
         let eq = self.read(&mut reads, "EQ", codec::EQ_PRESET, &[], codec::decode_eq)?;
-        // No bass-level read: the T310 does not answer an empty 0x0124 (HW1). It returns with W6.
-        // Spec: realme_t310.md#bass-read
+        // No bass-level read: the T310 answers 0x0124 neither with bass boost off (HW1) nor on
+        // (W6a). Spec: realme_t310.md#bass-read
         let codec = self.read(&mut reads, "codec", codec::CODEC, &[], codec::decode_codec)?;
         let firmware = self.read(&mut reads, "firmware", codec::FIRMWARE, &[], codec::decode_firmware)?;
 
@@ -269,6 +271,26 @@ impl Session for T310Session {
                 format!("the buds accepted noise control {wanted}, but still report {reported}")
             },
         )
+    }
+
+    /// Spec: realme_t310.md#eq-read, #custom-eq
+    fn eq_presets(&mut self) -> Result<EqPresets> {
+        let mut reads = Reads::default();
+        let current = self.read(&mut reads, "EQ", codec::EQ_PRESET, &[], codec::decode_eq)?;
+        let custom = self.read(
+            &mut reads,
+            "custom EQ list",
+            codec::CUSTOM_EQ_LIST,
+            &[],
+            codec::decode_custom_eqs,
+        )?;
+        let mut presets = codec::builtin_eqs();
+        presets.extend(custom.into_iter().flatten());
+        Ok(EqPresets {
+            current,
+            presets,
+            warnings: reads.warnings,
+        })
     }
 
     /// Built-in presets only; custom EQs come with W11. Spec: realme_t310.md#eq-write
@@ -1012,5 +1034,39 @@ mod tests {
         let result = open(&script).unwrap().set_hold_cycle(&["anc"]);
         script.assert_done();
         assert!(matches!(result, Err(Error::Usage(_))));
+    }
+
+    /// The custom EQ list of the owner's T310 (W11a): one flat preset, "Custom1", id 04.
+    const OWNER_CUSTOM_EQS: &str =
+        "00 01 01 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+
+    #[test]
+    fn lists_built_in_and_custom_eq_presets() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x010F, 0x05, ""),
+            rx(0x810F, 0x05, "00 04"),
+            tx(0x0122, 0x06, ""),
+            // The owner's T310 (W11a).
+            rx(0x8122, 0x06, OWNER_CUSTOM_EQS),
+        ]);
+        let script = Script::new(steps);
+        let eq = open(&script).unwrap().eq_presets().unwrap();
+        script.assert_done();
+        assert_eq!(eq.current.as_deref(), Some("custom-4"));
+        let names: Vec<(&str, bool)> = eq.presets.iter().map(|p| (p.name.as_str(), p.custom)).collect();
+        assert_eq!(
+            names,
+            [
+                ("pure-raw", false),
+                ("deep-bass", false),
+                ("pure-vocals", false),
+                ("pure-bass", false),
+                ("Custom1", true)
+            ]
+        );
+        let bands: Vec<u16> = eq.presets.last().unwrap().bands.iter().map(|b| b.hz).collect();
+        assert_eq!(bands, [50, 250, 1000, 4000, 8000, 16000]);
+        assert!(eq.warnings.is_empty());
     }
 }

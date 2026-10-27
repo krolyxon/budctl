@@ -65,8 +65,8 @@ enum Command {
         #[arg(value_enum)]
         mode: AncArg,
     },
-    /// Select an EQ preset (pure-raw, deep-bass, pure-vocals, pure-bass), then read it back.
-    Eq { preset: String },
+    /// List the EQ presets, or select one (pure-raw, deep-bass, pure-vocals, pure-bass) and read it back.
+    Eq { preset: Option<String> },
     /// Turn an on/off setting on or off, then read it back. Switches: game, bass-boost, spatial (3D sound), wind, dual.
     Set {
         /// The switch's name, as `status --json` lists it.
@@ -254,7 +254,13 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let now = session.set_noise_control(mode.into())?;
             output::noise_control(out, &device, model, &now, cli.json)
         }
-        Command::Eq { ref preset } => {
+        Command::Eq { preset: None } => {
+            let presets = session.eq_presets()?;
+            output::eq_presets(out, &device, model, &presets, cli.json)
+        }
+        Command::Eq {
+            preset: Some(ref preset),
+        } => {
             let now = session.set_eq(preset)?;
             output::eq(out, &device, model, &now, cli.json)
         }

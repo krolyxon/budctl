@@ -310,7 +310,8 @@ Preset names are the vendor app's (*vendor*).
 Evidence: *vendor*; the T310's command set lists it.
 
 - **Reply:** `00 <min s8> <max s8> <level s8>`. The usual range bytes are `FB 05`, meaning -5..+5.
-- **The T310 does not answer it** (*ours-2026-10-27*): an empty `0x0124` got no reply within 3 s, although bit 38 is set. budctl no longer sends it. Bass level returns at W6, from an Android HCI snoop of realme Link reading it.
+- **The T310 does not answer it with bass boost off** (*ours-2026-10-27*, HW1): an empty `0x0124` got no reply within 3 s, although bit 38 is set. Bass boost (switch `1D`) was off at the time.
+- <a id="bass-read-w6"></a>**Not with bass boost on either** (*ours-2026-10-27*, W6a). The vendor data ties the bass level to the bass engine, so the read might have needed bass boost on. With `0x010D` reporting `1D 01`, an empty `0x0124` again got no reply within 3 s. budctl does not send it. Without a read, a bass-level write ([§10.4](#bass-write)) can only be checked by ear.
 
 <a id="gestures"></a>
 ### 9.8 Touch controls: `0x0108`
@@ -478,6 +479,21 @@ Evidence: *vendor*
   - `03` deletes it.
 - **Ids are renumbered** after a create or delete, so read the list again each time.
 - **Defaults:** 6 bands at 62, 250, 1000, 4000, 8000 and 16000 Hz. Range bytes `FA 06` mean -6..+6 dB. At most 3 presets.
+- **The owner's T310** (*ours-2026-10-27*, W11a) answered the list read within 26 ms with one preset:
+
+  ```
+  00 01                      status, 1 preset
+  01 FA 06 04                selected, -6..+6 dB, id 04
+  07 43 75 73 74 6F 6D 31    name, 7 bytes: "Custom1"
+  06                         6 bands
+  32 00 00   FA 00 00   E8 03 00   A0 0F 00   40 1F 00   80 3E 00
+                             50, 250, 1000, 4000, 8000, 16000 Hz, each 0 dB
+  ```
+
+  - **The lowest band is 50 Hz, not 62.** The vendor default above does not hold on the T310; use the bands the buds report.
+  - **The preset was already there** when budctl first read it. Its origin is unknown: it may be the factory state, or left over from realme Link.
+  - **It was in use:** `0x010F` answered `00 04` at the same time, so `custom-4` is a valid current EQ, and the list's `selected` byte (`01`) agrees.
+- **What budctl does** (W11, one step per checkpoint, no app capture): `budctl eq` with no preset reads `0x010F` and the list (W11a, read-only). A custom preset shows as `custom-<id>`, the name `0x010F` decoding uses, followed by its stored name and bands. Create, save and delete follow one at a time.
 
 <a id="absent"></a>
 ## 11. Not on the T310
@@ -498,8 +514,8 @@ Evidence: *vendor*
 7. How long after the game-mode ack the new value shows up in `0x010D`: at most 1 s on the T310 (W3). Whether it is sooner was not measured.
 8. The shape of the T310 gesture table is answered at HW1: six entries, `<side> <group> <act> <fn>`, double tap, triple tap and hold for each bud. The names of the EQ presets in realme Link are still open.
 9. Whether the minimum 200 ms spacing between sends is needed.
-10. Why the T310 ignores `0x0124` although bit 38 is set ([§9.7](#bass-read)). Needs a realme Link capture before W6.
-11. How to turn noise cancelling on at the level the buds saved, without forcing deep ([§10.1](#anc-write)). Needs a realme Link snoop.
+10. Why the T310 never answers `0x0124`, with bass boost off (HW1) or on (W6a), although bit 38 is set ([§9.7](#bass-read)).
+11. How to turn noise cancelling on at the level the buds saved, without forcing deep ([§10.1](#anc-write)). Would need a realme Link snoop, which the owner declined.
 
 <a id="roadmap"></a>
 ## 13. Roadmap and hardware checkpoints
@@ -519,20 +535,22 @@ The owner runs each checkpoint with `--debug` and pastes the output. Results go 
 | W3 | `game on/off` |
 | W4 | `eq <preset>` |
 | W5 | `set bass-boost` → `set spatial` → `set wind` → `set dual`, each one checkpoint |
-| W6 | `bass <level>` |
+| W6 | W6a: read `0x0124` with bass boost on; W6b: `bass <level>` |
 | W7 | `find` |
 | W8 | `touch <side> <gesture> <action>` (`--dry-run` first) |
 | W9 | `touch cycle` |
 | W10 | ~~`fit-test`~~: dropped, the T310 runs no test ([§10.8](#fit-test)) |
-| W11 | custom EQ (create, then save, then delete) |
+| W11 | W11a: `eq` lists the custom presets (read-only); then create, save and delete, one checkpoint each |
 
-Ask for an Android HCI snoop of realme Link before W11, and for any write that does nothing.
+The owner will not install realme Link (2026-10-27), so there is no app capture. W6 and W11 use only the vendor-documented bytes in this spec, one checkpoint at a time.
 
 <a id="verification-log"></a>
 ## 14. Verification log
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W11a `eq` (custom list `0x0122`) | pass | One preset, "Custom1" (id `04`, 6 flat bands from 50 Hz), and it is the EQ in use. See [§10.9](#custom-eq) |
+| 2026-10-27 | W6a `status` with bass boost on (`0x0124`) | fail: no reply | Still no answer in 3 s. budctl does not send it. See [§9.7](#bass-read) |
 | 2026-10-27 | W10 `fit-test` | fail: no test | Start and stop were acked, but no result push and no sound came in 15 s. The owner dropped the fit test. See [§10.8](#fit-test) |
 | 2026-10-27 | W9 `touch cycle off transparency anc`, then `off anc` | pass | Masks `0B` and `09` were acked and read back on the first try. The owner confirmed the new cycle with the hold gesture. The cycle is now off → anc. See [§10.7](#hold-cycle-write) |
 | 2026-10-27 | W8 `touch left triple-tap volume-up` (`--dry-run`, then sent), then `previous` | pass | The dry run's payload matched the derived frame. Both writes were acked and read back on the first try, 600 ms after the ack. The ack echoes the old table, cut short. The owner confirmed that the new gesture works. The left triple tap is now `previous`. See [§10.6](#gesture-write) |

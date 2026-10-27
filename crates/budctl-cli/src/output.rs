@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use budctl_core::bluez::PairedDevice;
 use budctl_core::devices::Device;
-use budctl_core::status::{Charge, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls};
+use budctl_core::status::{Charge, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls};
 use budctl_core::{Error, Found};
 use serde_json::Value;
 
@@ -275,6 +275,47 @@ pub fn switch(
     }
     header(out, device, model)?;
     writeln!(out, "  {}  {}", now.label, if now.on { "on" } else { "off" })?;
+    Ok(())
+}
+
+/// Every EQ preset, with the one in use marked `*`.
+pub fn eq_presets(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    eq: &EqPresets,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(out, Some((device, model)), serde_json::to_value(eq)?);
+    }
+    header(out, device, model)?;
+    let current = eq.current.as_deref();
+    for preset in eq.presets.iter().filter(|p| !p.custom) {
+        let mark = if current == Some(preset.name.as_str()) {
+            "*"
+        } else {
+            " "
+        };
+        writeln!(out, "  {mark} {}", preset.name)?;
+    }
+    let custom: Vec<_> = eq.presets.iter().filter(|p| p.custom).collect();
+    if custom.is_empty() {
+        writeln!(out, "  Custom presets: none")?;
+    } else {
+        writeln!(out, "  Custom presets:")?;
+    }
+    for preset in custom {
+        let name = format!("custom-{}", preset.id);
+        let mark = if current == Some(name.as_str()) { "*" } else { " " };
+        let bands: Vec<String> = preset
+            .bands
+            .iter()
+            .map(|b| format!("{} Hz {:+}", b.hz, b.gain))
+            .collect();
+        writeln!(out, "  {mark} {name} \"{}\": {}", preset.name, bands.join(", "))?;
+    }
+    warnings(out, &eq.warnings)?;
     Ok(())
 }
 

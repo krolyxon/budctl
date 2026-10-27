@@ -113,6 +113,35 @@ pub struct Gesture {
     pub group: Option<u8>,
 }
 
+/// The EQ presets the buds have, and which one is in use.
+#[derive(Debug, Default, Serialize)]
+pub struct EqPresets {
+    /// Name of the preset in use, as in [`Status::eq`].
+    pub current: Option<String>,
+    /// Built-in presets first, then custom ones.
+    pub presets: Vec<EqPreset>,
+    /// Reads that failed. The rest is still valid.
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EqPreset {
+    /// Built-in presets: the name `eq <preset>` takes. Custom ones: the name stored on the buds.
+    pub name: String,
+    /// The buds' id for it.
+    pub id: u8,
+    pub custom: bool,
+    /// Custom presets only: gain per band. Empty for built-in presets.
+    pub bands: Vec<EqBand>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct EqBand {
+    pub hz: u16,
+    /// dB.
+    pub gain: i8,
+}
+
 /// A touch-control change: what changes, the write that does it and, once sent, the table the
 /// buds report afterwards.
 #[derive(Debug, Serialize)]

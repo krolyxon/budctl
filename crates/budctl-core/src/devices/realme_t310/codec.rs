@@ -3,7 +3,7 @@
 
 use crate::error::{Error, Result};
 use crate::reader::Reader;
-use crate::status::{AncLevel, Battery, Charge, Gesture, NoiseControl, NoiseMode, Switch};
+use crate::status::{AncLevel, Battery, Charge, EqBand, EqPreset, Gesture, NoiseControl, NoiseMode, Switch};
 
 /// Spec: realme_t310.md#bitmap
 pub(super) const HANDSHAKE: u16 = 0x0100;
@@ -38,9 +38,8 @@ pub(super) fn find_payload(ring: bool) -> [u8; 1] {
 pub(super) const EQ_PRESET: u16 = 0x010F;
 /// Spec: realme_t310.md#codec
 pub(super) const CODEC: u16 = 0x0114;
-/// Not sent: the T310 does not answer it (HW1). Kept for W6. Spec: realme_t310.md#bass-read
-#[allow(dead_code)]
-pub(super) const BASS_LEVEL: u16 = 0x0124;
+/// Spec: realme_t310.md#custom-eq
+pub(super) const CUSTOM_EQ_LIST: u16 = 0x0122;
 /// Spec: realme_t310.md#events-offered
 pub(super) const EVENTS_OFFERED: u16 = 0x0200;
 /// Spec: realme_t310.md#subscribe
@@ -454,15 +453,44 @@ pub(super) fn decode_eq(reply: &[u8]) -> Result<String> {
     Ok(name_of(&EQ_PRESETS, id).map_or_else(|| format!("custom-{id}"), str::to_owned))
 }
 
-/// `00 <min> <max> <level>`, all signed. Not used until W6. Spec: realme_t310.md#bass-read
-#[allow(dead_code)]
-pub(super) fn decode_bass_level(reply: &[u8]) -> Result<i8> {
-    let mut r = ok_reply(reply, "the bass-level reply")?;
-    let (min, max, level) = (r.i8()?, r.i8()?, r.i8()?);
-    if !(min..=max).contains(&level) {
-        return Err(Error::Protocol(format!("bass level {level} outside {min}..={max}")));
+/// The built-in EQ presets, in id order. Spec: realme_t310.md#eq-read
+pub(super) fn builtin_eqs() -> Vec<EqPreset> {
+    EQ_PRESETS
+        .iter()
+        .map(|&(id, name)| EqPreset {
+            name: name.to_owned(),
+            id,
+            custom: false,
+            bands: Vec::new(),
+        })
+        .collect()
+}
+
+/// `00 <count>`, then per preset `<selected> <min> <max> <id> <nameLen> <name> <bands>
+/// (<freq u16 LE> <gain s8>)…`. Spec: realme_t310.md#custom-eq
+pub(super) fn decode_custom_eqs(reply: &[u8]) -> Result<Vec<EqPreset>> {
+    let mut r = ok_reply(reply, "the custom EQ list")?;
+    let mut presets = Vec::new();
+    for _ in 0..r.u8()? {
+        let (_selected, _min, _max) = (r.u8()?, r.i8()?, r.i8()?);
+        let id = r.u8()?;
+        let name_len = r.u8()?;
+        let name = String::from_utf8_lossy(r.take(usize::from(name_len))?).into_owned();
+        let mut bands = Vec::new();
+        for _ in 0..r.u8()? {
+            bands.push(EqBand {
+                hz: r.u16_le()?,
+                gain: r.i8()?,
+            });
+        }
+        presets.push(EqPreset {
+            name,
+            id,
+            custom: true,
+            bands,
+        });
     }
-    Ok(level)
+    Ok(presets)
 }
 
 /// One gesture-table entry: `<dev> <btn> <act> <fn>`. Spec: realme_t310.md#gestures
@@ -786,14 +814,12 @@ mod tests {
     }
 
     #[test]
-    fn eq_codec_and_bass_level() {
+    fn eq_and_codec() {
         assert_eq!(decode_eq(&hex("00 00")).unwrap(), "pure-raw");
         assert_eq!(decode_eq(&hex("00 03")).unwrap(), "pure-bass");
         assert_eq!(decode_eq(&hex("00 05")).unwrap(), "custom-5");
         assert_eq!(decode_codec(&hex("00 02")).unwrap(), "AAC");
         assert_eq!(decode_codec(&hex("00 09")).unwrap(), "unknown (0x09)");
-        assert_eq!(decode_bass_level(&hex("00 FB 05 FE")).unwrap(), -2);
-        assert!(decode_bass_level(&hex("00 FB 05 07")).is_err());
     }
 
     #[test]
@@ -901,5 +927,25 @@ mod tests {
             crate::devices::realme_t310::frame::encode(NOISE_CONTROL_WRITE, 0x06, &hold_cycle_write_payload(0x0B))
                 .unwrap();
         assert_eq!(crate::debug::hex(&frame), "AA 0A 00 00 04 04 06 03 00 02 01 0B");
+    }
+
+    #[test]
+    fn custom_eq_list() {
+        assert!(decode_custom_eqs(&hex("00 00")).unwrap().is_empty());
+        // One preset "Me", selected, range FA 06, two bands: 62 Hz +3, 16 kHz -2.
+        let reply = hex("00 01 01 FA 06 04 02 4D 65 02 3E 00 03 80 3E FE");
+        let presets = decode_custom_eqs(&reply).unwrap();
+        assert_eq!(
+            presets,
+            [EqPreset {
+                name: "Me".to_owned(),
+                id: 0x04,
+                custom: true,
+                bands: vec![EqBand { hz: 62, gain: 3 }, EqBand { hz: 16000, gain: -2 }],
+            }]
+        );
+        // Cut short inside the bands.
+        assert!(decode_custom_eqs(&hex("00 01 01 FA 06 04 02 4D 65 02 3E 00")).is_err());
+        assert_eq!(builtin_eqs().len(), 4);
     }
 }

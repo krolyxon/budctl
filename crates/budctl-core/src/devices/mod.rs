@@ -6,7 +6,7 @@
 use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
-use crate::status::{NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
+use crate::status::{EqPresets, NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
 use crate::transport::Transport;
 
 pub mod realme_t310;
@@ -45,6 +45,13 @@ pub trait Session: Send {
     fn set_noise_control(&mut self, _mode: NoiseMode) -> Result<NoiseControl> {
         Err(Error::Unsupported(
             "these buds have no noise-control setting budctl can change".to_owned(),
+        ))
+    }
+
+    /// The EQ presets on the buds, built-in and custom, and the one in use.
+    fn eq_presets(&mut self) -> Result<EqPresets> {
+        Err(Error::Unsupported(
+            "budctl cannot list the EQ presets of these buds".to_owned(),
         ))
     }
 
