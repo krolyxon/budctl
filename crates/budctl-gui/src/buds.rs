@@ -34,17 +34,32 @@ impl Buds {
         self.status.eq = Some(now);
     }
 
-    /// Takes in a custom preset as the buds report it after a write: saved, and in use.
+    /// Takes in a custom preset as the buds report it after a write: saved, and in use. A new
+    /// one joins the list.
     pub fn set_custom(&mut self, preset: EqPreset) {
         let now = key(&preset);
-        if let Some(shown) = self
-            .eq
-            .as_mut()
-            .and_then(|eq| eq.presets.iter_mut().find(|p| p.custom && p.id == preset.id))
-        {
-            *shown = preset;
+        if let Some(eq) = self.eq.as_mut() {
+            match eq.presets.iter_mut().find(|p| p.custom && p.id == preset.id) {
+                Some(shown) => *shown = preset,
+                None => eq.presets.push(preset),
+            }
         }
         self.set_eq(now);
+    }
+
+    /// Takes in the whole preset list, as the buds report it.
+    pub fn set_presets(&mut self, eq: EqPresets) {
+        self.status.eq.clone_from(&eq.current);
+        self.eq = Some(eq);
+    }
+
+    /// The custom presets' names, as the buds store them.
+    pub fn custom_names(&self) -> impl Iterator<Item = (u8, &str)> {
+        self.eq
+            .iter()
+            .flat_map(|eq| eq.presets.iter())
+            .filter(|p| p.custom)
+            .map(|p| (p.id, p.name.as_str()))
     }
 
     /// The preset with this id.

@@ -14,12 +14,14 @@ use crate::{Draft, Item, Marks, Message};
 const SAVING: &str = "Saving…";
 
 /// What the keyboard cursor can rest on, top to bottom, as [`view`] shows them: each preset,
-/// then each band of each custom preset.
+/// "New preset", then for each custom preset "Rename" and its bands.
 pub fn items(buds: &Buds) -> Vec<Item> {
     let mut items = Vec::new();
     if let Some(eq) = &buds.eq {
         items.extend(eq.presets.iter().map(|p| Item::Preset(p.id)));
+        items.push(Item::NewPreset);
         for preset in eq.presets.iter().filter(|p| p.custom) {
+            items.push(Item::Rename(preset.id));
             items.extend(preset.bands.iter().map(|band| Item::Band(preset.id, band.hz)));
         }
     }
@@ -67,9 +69,35 @@ pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a Draft>, marks: Mar
     eq.presets
         .iter()
         .filter(|p| p.custom)
-        .fold(column![title, ui::card(look, rows)].spacing(18), |page, preset| {
-            page.push(bands(look, preset, draft, marks))
-        })
+        .fold(
+            column![title, ui::card(look, rows), new_preset(look, marks)].spacing(18),
+            |page, preset| page.push(bands(look, preset, draft, marks)),
+        )
+        .into()
+}
+
+/// The button that creates a custom preset, and what it is doing.
+fn new_preset<'a>(look: Look, marks: Marks) -> Element<'a, Message> {
+    let creating = marks
+        .pending
+        .contains(&Item::NewPreset)
+        .then(|| text("Creating…").size(13).color(look.p.icon));
+    let about = text("A new preset starts flat, with the bands of your other presets, and is put to use.")
+        .size(13)
+        .color(look.p.dim)
+        .width(Length::Fill);
+    row![about]
+        .push(creating)
+        .push(ui::pill_with(
+            look,
+            "New preset",
+            false,
+            marks.focus == Some(Item::NewPreset),
+            Message::NewPreset,
+        ))
+        .spacing(14)
+        .align_y(Alignment::Center)
+        .padding([0, 8])
         .into()
 }
 
@@ -94,6 +122,13 @@ fn bands<'a>(look: Look, preset: &'a EqPreset, draft: Option<&'a Draft>, marks: 
             .width(Length::Fill)
     ]
     .push(saving)
+    .push(ui::pill_with(
+        look,
+        "Rename",
+        false,
+        marks.focus == Some(Item::Rename(id)),
+        Message::RenamePreset(id),
+    ))
     .spacing(10)
     .align_y(Alignment::Center);
     let sliders = gains.iter().fold(Row::new().spacing(6), |sliders, &band| {
@@ -168,9 +203,11 @@ mod tests {
     #[test]
     fn items_follow_the_page() {
         let items = items(&buds::demo());
-        assert_eq!(items.len(), 5 + 6);
+        assert_eq!(items.len(), 5 + 1 + 1 + 6);
         assert_eq!(items.first(), Some(&Item::Preset(0)));
-        assert_eq!(items.get(5), Some(&Item::Band(4, 50)));
+        assert_eq!(items.get(5), Some(&Item::NewPreset));
+        assert_eq!(items.get(6), Some(&Item::Rename(4)));
+        assert_eq!(items.get(7), Some(&Item::Band(4, 50)));
         assert_eq!(items.last(), Some(&Item::Band(4, 16000)));
         assert!(super::items(&buds::unknown()).is_empty());
     }

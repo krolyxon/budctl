@@ -24,10 +24,10 @@ use std::time::{Duration, Instant};
 
 use budctl_core::Kind;
 use budctl_core::bt::BdAddr;
-use budctl_core::status::{AncLevel, EqBand, NoiseControl, NoiseMode, Switch};
+use budctl_core::status::{AncLevel, EqBand, EqPreset, NoiseControl, NoiseMode, Switch};
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::operation::{self, RelativeOffset};
-use iced::widget::{Column, column, container, mouse_area, opaque, row, scrollable, space, stack, text};
+use iced::widget::{Column, column, container, mouse_area, opaque, row, scrollable, space, stack, text, text_input};
 use iced::{Alignment, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme, event, mouse, window};
 
 use icons::Icon;
@@ -46,6 +46,8 @@ Press ? in the window for the keys.";
 
 /// The page's scrolling area, so the cursor can be kept in view.
 const SCROLL: &str = "page";
+/// The name field of the preset-name dialog, so it can take the keyboard.
+const NAME_INPUT: &str = "name";
 
 /// When the window gets focus and the last reading is older than this, the buds are read again:
 /// the phone may have changed something meanwhile.
@@ -192,6 +194,26 @@ enum Item {
     Find,
     /// The bass level.
     Bass,
+    /// "New preset", on the Equalizer page.
+    NewPreset,
+    /// "Rename", on a custom EQ preset's card.
+    Rename(u8),
+}
+
+/// The dialog that asks for a preset's name.
+#[derive(Debug, Clone, PartialEq)]
+struct NamePrompt {
+    target: NameTarget,
+    text: String,
+    /// What is wrong with the name, after a try.
+    problem: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NameTarget {
+    New,
+    /// A custom preset, by its id.
+    Rename(u8),
 }
 
 /// What a page needs besides the buds: the item under the keyboard cursor, if it shows, and the
@@ -268,6 +290,13 @@ enum Message {
         save: bool,
     },
     SaveBass,
+    /// Ask for a new preset's name.
+    NewPreset,
+    /// Ask for a custom preset's (by its id) new name.
+    RenamePreset(u8),
+    NameInput(String),
+    SubmitName,
+    CancelName,
     ShowHelp,
     /// Read the buds again.
     Refresh,
@@ -317,6 +346,8 @@ struct App {
     confirm_find: bool,
     /// Why the palette file could not be used, if it could not.
     palette_problem: Option<String>,
+    /// The preset-name dialog, when it is open.
+    prompt: Option<NamePrompt>,
 }
 
 impl App {
@@ -354,6 +385,7 @@ impl App {
             ringing: false,
             confirm_find: false,
             palette_problem: None,
+            prompt: None,
         };
         app.refresh_palette();
         app
@@ -396,6 +428,19 @@ impl App {
                 }
             }
             Message::SaveBass => self.save_bass(),
+            Message::NewPreset => return self.ask_name(NameTarget::New, String::new()),
+            Message::RenamePreset(id) => {
+                let name = self.buds.preset(id).map(|p| p.name.clone()).unwrap_or_default();
+                return self.ask_name(NameTarget::Rename(id), name);
+            }
+            Message::NameInput(text) => {
+                if let Some(prompt) = &mut self.prompt {
+                    prompt.text = text;
+                    prompt.problem = None;
+                }
+            }
+            Message::SubmitName => self.submit_name(),
+            Message::CancelName => self.prompt = None,
             Message::Refresh => self.refresh(),
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
@@ -454,6 +499,32 @@ impl App {
                 Command::Bass(level) => {
                     self.buds.bass = Some(level);
                     self.bass_draft = None;
+                }
+                Command::CreateEq(name) => {
+                    let customs = || {
+                        self.buds
+                            .eq
+                            .iter()
+                            .flat_map(|eq| eq.presets.iter())
+                            .filter(|p| p.custom)
+                    };
+                    let model = customs().next().cloned();
+                    let id = customs().map(|p| p.id).max().map_or(4, |id| id.saturating_add(1));
+                    if let Some(model) = model {
+                        self.buds.set_custom(EqPreset {
+                            name,
+                            id,
+                            custom: true,
+                            bands: model.bands.iter().map(|b| EqBand { hz: b.hz, gain: 0 }).collect(),
+                            range: model.range,
+                        });
+                    }
+                }
+                Command::RenameEq(_, name) => {
+                    if let Some(preset) = self.buds.preset(item_preset(item)) {
+                        let preset = EqPreset { name, ..preset.clone() };
+                        self.buds.set_custom(preset);
+                    }
                 }
                 Command::CustomEq(_, bands) => {
                     if let Some(preset) = self.buds.preset(item_preset(item)) {
@@ -562,6 +633,11 @@ impl App {
                 if let Some(Some(Item::Gesture(row))) = done {
                     self.save_touch(row);
                 }
+            }
+            Event::Presets(eq) => {
+                self.in_flight.pop_front();
+                self.buds.set_presets(eq);
+                self.link = Link::Live;
             }
             Event::Bass(level) => {
                 self.in_flight.pop_front();
@@ -738,6 +814,59 @@ impl App {
         }
     }
 
+    /// Opens the preset-name dialog, with the keyboard in its field.
+    fn ask_name(&mut self, target: NameTarget, text: String) -> Task<Message> {
+        self.prompt = Some(NamePrompt {
+            target,
+            text,
+            problem: None,
+        });
+        operation::focus(NAME_INPUT)
+    }
+
+    /// Creates or renames the preset, if the name will do. What the buds themselves refuse (a
+    /// name too long for them, a fourth preset) comes back as an error.
+    fn submit_name(&mut self) {
+        let Some(prompt) = self.prompt.clone() else {
+            return;
+        };
+        let renaming = match prompt.target {
+            NameTarget::Rename(id) => Some(id),
+            NameTarget::New => None,
+        };
+        let taken = self
+            .buds
+            .custom_names()
+            .any(|(id, name)| name == prompt.text && Some(id) != renaming);
+        let problem = if prompt.text.is_empty() || prompt.text.trim() != prompt.text {
+            Some("A name cannot be empty, or start or end with a space.".to_owned())
+        } else if prompt.text.chars().any(char::is_control) {
+            Some("A name cannot hold control characters.".to_owned())
+        } else if taken {
+            Some(format!("A preset is called {} already.", prompt.text))
+        } else {
+            None
+        };
+        if let Some(problem) = problem {
+            self.prompt = Some(NamePrompt {
+                problem: Some(problem),
+                ..prompt
+            });
+            return;
+        }
+        self.prompt = None;
+        match prompt.target {
+            NameTarget::New => self.write(Item::NewPreset, Command::CreateEq(prompt.text)),
+            NameTarget::Rename(id) => {
+                let unchanged = self.buds.preset(id).is_some_and(|p| p.name == prompt.text);
+                if let (false, Some(preset)) = (unchanged, self.buds.preset(id)) {
+                    let command = Command::RenameEq(buds::key(preset), prompt.text);
+                    self.write(Item::Preset(id), command);
+                }
+            }
+        }
+    }
+
     /// Sets the bass level moved on the screen. If a level is on its way, this one goes out
     /// when that is answered: the latest level wins.
     fn save_bass(&mut self) {
@@ -764,6 +893,13 @@ impl App {
     }
 
     fn key(&mut self, key: &Key, modifiers: Modifiers) -> Task<Message> {
+        if self.prompt.is_some() {
+            // The name field takes the keys, and Enter in it; only Esc is ours.
+            if matches!(key, Key::Named(keyboard::key::Named::Escape)) {
+                self.prompt = None;
+            }
+            return Task::none();
+        }
         let Some(action) = self.keys.press(key, modifiers) else {
             return Task::none();
         };
@@ -920,6 +1056,8 @@ impl App {
                 })
             }
             Item::Find => (action != Action::Left).then_some(Message::Find),
+            Item::NewPreset => (action != Action::Left).then_some(Message::NewPreset),
+            Item::Rename(id) => (action != Action::Left).then_some(Message::RenamePreset(id)),
             Item::Bass => {
                 let (low, high) = self.buds.bass_range?;
                 let now = self.bass_draft.or(self.buds.bass);
@@ -1067,6 +1205,8 @@ impl App {
             stack![window, self.help()].into()
         } else if self.confirm_find {
             stack![window, self.confirm_find()].into()
+        } else if let Some(prompt) = &self.prompt {
+            stack![window, self.name_prompt(prompt)].into()
         } else {
             window.into()
         }
@@ -1209,6 +1349,58 @@ impl App {
         .spacing(10);
         let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
         let backdrop = container(container(dialog).width(480))
+            .center(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
+                ..container::Style::default()
+            });
+        opaque(backdrop)
+    }
+
+    /// The dialog that asks for a preset's name, over a dimmed window.
+    fn name_prompt<'a>(&'a self, prompt: &'a NamePrompt) -> Element<'a, Message> {
+        let look = self.look;
+        let p = look.p;
+        let (heading, action) = match prompt.target {
+            NameTarget::New => ("New preset".to_owned(), "Create"),
+            NameTarget::Rename(id) => {
+                let name = self.buds.preset(id).map_or("the preset", |preset| preset.name.as_str());
+                (format!("Rename {name}"), "Rename")
+            }
+        };
+        let field = text_input("Name", &prompt.text)
+            .id(NAME_INPUT)
+            .on_input(Message::NameInput)
+            .on_submit(Message::SubmitName)
+            .size(16)
+            .padding([10, 14])
+            .style(move |_, _| text_input::Style {
+                background: p.surface_high.into(),
+                border: Border {
+                    color: p.accent,
+                    width: 1.0,
+                    radius: 10.0.into(),
+                },
+                icon: p.dim,
+                placeholder: p.dim,
+                value: p.fg,
+                selection: p.accent_dim,
+            });
+        let problem = prompt
+            .problem
+            .as_deref()
+            .map(|problem| text(problem).size(13).color(p.err));
+        let buttons = row![
+            space::horizontal(),
+            ui::pill(look, "Cancel", false, Message::CancelName),
+            ui::pill(look, action, true, Message::SubmitName),
+        ]
+        .spacing(10);
+        let dialog = column![text(heading).size(22).font(look.bold()).color(p.fg), field]
+            .push(problem)
+            .push(buttons)
+            .spacing(16);
+        let backdrop = container(container(ui::panel(look, dialog.into())).width(460))
             .center(Length::Fill)
             .style(|_| container::Style {
                 background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
@@ -1766,6 +1958,71 @@ mod tests {
     }
 
     #[test]
+    fn presets_are_created_and_renamed() {
+        let mut app = app();
+        let _ = app.update(Message::NewPreset);
+        assert!(app.prompt.is_some());
+        // Typing goes to the field, not to the cursor.
+        press(&mut app, "j j");
+        assert_eq!(app.focus(), None);
+        let _ = app.update(Message::NameInput(" Gym".to_owned()));
+        let _ = app.update(Message::SubmitName);
+        assert!(app.prompt.as_ref().is_some_and(|p| p.problem.is_some()));
+        let _ = app.update(Message::NameInput("Custom1".to_owned()));
+        let _ = app.update(Message::SubmitName);
+        assert!(app.prompt.as_ref().is_some_and(|p| p.problem.is_some()), "taken");
+        let _ = app.update(Message::NameInput("Gym".to_owned()));
+        let _ = app.update(Message::SubmitName);
+        assert_eq!(app.prompt, None);
+        assert_eq!(app.buds.eq_name(), "Gym", "a new preset is put to use");
+        let gym = app
+            .buds
+            .custom_names()
+            .find(|(_, name)| *name == "Gym")
+            .map(|(id, _)| id)
+            .unwrap();
+
+        let _ = app.update(Message::RenamePreset(gym));
+        assert_eq!(app.prompt.as_ref().map(|p| p.text.as_str()), Some("Gym"));
+        let _ = app.update(Message::NameInput("Run".to_owned()));
+        let _ = app.update(Message::SubmitName);
+        assert_eq!(app.buds.preset(gym).map(|p| p.name.as_str()), Some("Run"));
+
+        let _ = app.update(Message::RenamePreset(gym));
+        press(&mut app, "Esc");
+        assert_eq!(app.prompt, None);
+    }
+
+    #[test]
+    fn live_presets_are_created_and_renamed_by_the_buds() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::NewPreset);
+        let _ = app.update(Message::NameInput("Gym".to_owned()));
+        let _ = app.update(Message::SubmitName);
+        assert!(matches!(commands.try_recv(), Ok(Command::CreateEq(name)) if name == "Gym"));
+        assert_eq!(app.pending(), [Item::NewPreset]);
+        let mut presets = buds::demo().eq.unwrap();
+        let mut gym = presets.presets.last().unwrap().clone();
+        gym.id = 5;
+        gym.name = "Gym".to_owned();
+        presets.presets.push(gym);
+        presets.current = Some("custom-5".to_owned());
+        let _ = app.update(Message::Worker(Event::Presets(presets)));
+        assert_eq!(app.buds.eq_name(), "Gym");
+        assert!(app.pending().is_empty());
+
+        let _ = app.update(Message::RenamePreset(4));
+        let _ = app.update(Message::NameInput("Run".to_owned()));
+        let _ = app.update(Message::SubmitName);
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::RenameEq(preset, name)) if preset == "custom-4" && name == "Run"
+        ));
+    }
+
+    #[test]
     fn steps() {
         let abc = ['a', 'b', 'c'];
         assert_eq!(step(&abc, Some(0), Action::Left), None);
@@ -1824,6 +2081,11 @@ mod tests {
             1340.0,
             on(Page::Overview, "j j j j j j l l"),
         ));
+        let mut naming = on(Page::Equalizer, "");
+        let _ = naming.update(Message::RenamePreset(4));
+        let _ = naming.update(Message::NameInput("Custom1 ".to_owned()));
+        let _ = naming.update(Message::SubmitName);
+        shots.push(("name-prompt".to_owned(), 800.0, naming));
         let mut connecting = App::new(palette.clone(), font, None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));

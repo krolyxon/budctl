@@ -48,6 +48,10 @@ pub enum Command {
     Find(bool),
     /// Set the bass level.
     Bass(i8),
+    /// Create a custom EQ preset with this name.
+    CreateEq(String),
+    /// Give a custom EQ preset (`custom-<id>`) a new name.
+    RenameEq(String, String),
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +78,8 @@ pub enum Event {
     Ringing(bool),
     /// The answer to [`Command::Bass`]: the level the buds took.
     Bass(i8),
+    /// The answer to [`Command::CreateEq`]: the whole preset list after it (ids can change).
+    Presets(EqPresets),
     /// The answer to a command that failed. The session is closed; the next command opens a
     /// new one.
     Failed { kind: Kind, message: String },
@@ -213,6 +219,17 @@ impl Worker {
                 .session()
                 .and_then(|session| session.set_touch(&side, &gesture, &action, false))
                 .map(|change| Event::Touch(change.gestures)),
+            Command::CreateEq(name) => self
+                .session()
+                .and_then(|session| {
+                    session.create_custom_eq(&name)?;
+                    session.eq_presets()
+                })
+                .map(Event::Presets),
+            Command::RenameEq(preset, name) => self
+                .session()
+                .and_then(|session| session.rename_custom_eq(&preset, &name))
+                .map(Event::CustomEq),
             Command::Bass(level) => self
                 .session()
                 .and_then(|session| session.set_bass_level(level))
