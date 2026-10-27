@@ -493,11 +493,15 @@ impl App {
         }
     }
 
-    /// Selects an EQ preset: a built-in one by name, a custom one by saving it unchanged.
+    /// Selects an EQ preset: a built-in one by name, a custom one by saving it unchanged. The
+    /// preset in use is left alone.
     fn select(&mut self, id: u8) {
         let Some(preset) = self.buds.preset(id) else {
             return;
         };
+        if self.buds.status.eq.as_deref() == Some(buds::key(preset).as_str()) {
+            return;
+        }
         let command = if preset.custom {
             Command::CustomEq(buds::key(preset), Vec::new())
         } else {
@@ -1176,6 +1180,17 @@ mod tests {
         assert_eq!(app.buds.name, "realme Buds T310");
         assert!(app.buds.connected);
         assert_eq!(app.items().len(), 10);
+    }
+
+    #[test]
+    fn the_preset_in_use_is_not_written_again() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::Preset(4));
+        assert!(commands.try_recv().is_err(), "Custom1 is in use already");
+        let _ = app.update(Message::Preset(3));
+        assert!(matches!(commands.try_recv(), Ok(Command::Eq(name)) if name == "pure-bass"));
     }
 
     #[test]
