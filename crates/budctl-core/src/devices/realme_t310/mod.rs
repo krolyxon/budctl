@@ -43,7 +43,11 @@ const READ_BACK_PAUSE: Duration = Duration::from_millis(300);
 
 /// The switches budctl may write, each added after the previous one passed its hardware
 /// checkpoint (CLAUDE.md rule 4). Spec: realme_t310.md#switch-write
-const WRITABLE_SWITCHES: [(&str, ReadBack); 2] = [("game", GAME_READ_BACK), ("bass-boost", READ_BACK)];
+const WRITABLE_SWITCHES: [(&str, ReadBack); 3] = [
+    ("game", GAME_READ_BACK),
+    ("bass-boost", READ_BACK),
+    ("spatial", READ_BACK),
+];
 
 fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
@@ -674,7 +678,7 @@ mod tests {
         steps.pop();
         let script = Script::new(steps);
         let mut session = open(&script).unwrap();
-        for key in ["dual", "wind", "spatial"] {
+        for key in ["dual", "wind"] {
             assert!(
                 matches!(session.set_switch(key, true), Err(Error::Unsupported(_))),
                 "{key}"
