@@ -1,0 +1,75 @@
+# cargo-deny policy (`cargo deny check bans licenses sources`).
+# CLAUDE.md hard rule 1: no network code anywhere in the dependency tree.
+# crates/budctl-core/tests/guards.rs reads the [bans] list below and checks Cargo.lock against
+# it, so the rule also holds where cargo-deny is not installed.
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+# Note: this check downloads the RustSec database (a dev-tool network access, not budctl's).
+version = 2
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Everything here is compatible with GPL-3.0-or-later.
+allow = [
+    "GPL-3.0-or-later",
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # HTTP clients and servers
+    { crate = "reqwest", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "hyper", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "hyper-util", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "h2", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "h3", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "quinn", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "ureq", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "surf", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "isahc", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "curl", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "curl-sys", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "attohttpc", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "minreq", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "tiny_http", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "axum", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "warp", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "actix-web", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "tungstenite", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "tokio-tungstenite", reason = "no network code (CLAUDE.md rule 1)" },
+    # TLS
+    { crate = "rustls", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "native-tls", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "openssl", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "openssl-sys", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "aws-lc-rs", reason = "no network code (CLAUDE.md rule 1)" },
+    # DNS, telemetry, self-update
+    { crate = "hickory-resolver", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "trust-dns-resolver", reason = "no network code (CLAUDE.md rule 1)" },
+    { crate = "sentry", reason = "no telemetry (CLAUDE.md non-goals)" },
+    { crate = "opentelemetry", reason = "no telemetry (CLAUDE.md non-goals)" },
+    { crate = "self_update", reason = "no update checks (CLAUDE.md non-goals)" },
+    # Keeps zbus on its own small executor instead of pulling in a whole async runtime.
+    { crate = "tokio", reason = "not needed; keep the dependency tree small" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

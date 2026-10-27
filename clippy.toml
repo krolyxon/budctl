@@ -1,0 +1,17 @@
+# Tests may unwrap and index; production code may not (see [workspace.lints] in Cargo.toml).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+
+# CLAUDE.md hard rule 1: no network sockets, ever.
+disallowed-types = [
+    { path = "std::net::TcpStream", reason = "budctl never opens network sockets (CLAUDE.md rule 1)" },
+    { path = "std::net::TcpListener", reason = "budctl never opens network sockets (CLAUDE.md rule 1)" },
+    { path = "std::net::UdpSocket", reason = "budctl never opens network sockets (CLAUDE.md rule 1)" },
+]
+
+disallowed-methods = [
+    { path = "std::thread::sleep", reason = "wait with Link::pump_until, so the buds' requests are still answered" },
+    { path = "std::process::exit", reason = "return an error and let main turn it into an exit code" },
+]

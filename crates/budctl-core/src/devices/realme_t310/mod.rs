@@ -1,0 +1,412 @@
+//! realme Buds T310. Spec: docs/protocol/realme_t310.md
+//!
+//! `frame.rs` and `link.rs` hold the protocol family's framing and request/reply logic;
+//! `codec.rs` holds everything specific to the T310.
+
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crate::bluez::PairedDevice;
+use crate::bt::Uuid;
+use crate::devices::{Device, Session};
+use crate::error::{Error, Kind, Result};
+use crate::status::{Status, TouchControls};
+use crate::transport::Transport;
+
+mod codec;
+mod frame;
+mod link;
+
+use codec::Commands;
+use link::Link;
+
+/// Spec: realme_t310.md#identity
+const BLUETOOTH_NAME: &str = "realme Buds T310";
+
+/// Control services, in the order to try. Spec: realme_t310.md#transport
+const SERVICES: [Uuid; 2] = [
+    Uuid::from_u128(0x0000_079A_D102_11E1_9B23_0002_5B00_A5A5),
+    Uuid::from_u128(0x0000_1107_D102_11E1_9B23_0002_5B00_A5A5),
+];
+
+/// Quiet time after connecting, before the first request. Spec: realme_t310.md#init
+const SETTLE: Duration = Duration::from_millis(300);
+
+pub struct RealmeT310;
+
+impl Device for RealmeT310 {
+    fn name(&self) -> &'static str {
+        BLUETOOTH_NAME
+    }
+
+    fn matches(&self, device: &PairedDevice) -> bool {
+        device.name == BLUETOOTH_NAME
+    }
+
+    fn rfcomm_uuids(&self) -> &'static [Uuid] {
+        &SERVICES
+    }
+
+    fn open(&self, transport: Box<dyn Transport>) -> Result<Box<dyn Session>> {
+        Ok(Box::new(T310Session::open(Link::new(transport, unix_time))?))
+    }
+}
+
+fn unix_time() -> u32 {
+    let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    u32::try_from(seconds).unwrap_or(u32::MAX)
+}
+
+struct T310Session {
+    link: Link,
+    commands: Commands,
+}
+
+/// Collects what a series of best-effort reads produced.
+#[derive(Default)]
+struct Reads {
+    warnings: Vec<String>,
+    answered: usize,
+}
+
+impl T310Session {
+    /// The session start. Spec: realme_t310.md#init
+    fn open(mut link: Link) -> Result<Self> {
+        link.pump_until(Instant::now() + SETTLE)?;
+
+        let bitmap = link.request(codec::HANDSHAKE, &[]).map_err(|error| match error {
+            // Provisional until checkpoint HW1: a link that connects but stays silent is most
+            // likely held by another app. Spec: realme_t310.md#open
+            Error::Timeout(_) => Error::ChannelBusy("connected, but the buds did not answer the handshake".to_owned()),
+            other => other,
+        })?;
+        let commands = Commands::parse(&bitmap)?;
+
+        let product = codec::decode_product_id(&link.request(codec::PRODUCT_ID, &[])?)?;
+        if product != codec::T310_PRODUCT_ID {
+            return Err(Error::WrongModel {
+                expected: BLUETOOTH_NAME,
+                found: format!("{product:06X}"),
+            });
+        }
+
+        let offered = codec::decode_events_offered(&link.request(codec::EVENTS_OFFERED, &[])?)?;
+        let subscription = codec::subscribe_payload(&offered, &commands);
+        if commands.allows(codec::SUBSCRIBE) && subscription.len() > 1 {
+            // Some buds never acknowledge this, so budctl does not wait. Spec: realme_t310.md#subscribe
+            link.send(codec::SUBSCRIBE, &subscription)?;
+        }
+        Ok(Self { link, commands })
+    }
+
+    /// Read and decode one value, if the buds offer the command. A read the buds answer badly
+    /// (timeout, refusal, garbage) becomes a warning so the rest still shows; a lost link stops
+    /// everything.
+    fn read<T>(
+        &mut self,
+        reads: &mut Reads,
+        what: &str,
+        cmd: u16,
+        payload: &[u8],
+        decode: fn(&[u8]) -> Result<T>,
+    ) -> Result<Option<T>> {
+        if !self.commands.allows(cmd) {
+            return Ok(None);
+        }
+        match self.link.request(cmd, payload).and_then(|reply| decode(&reply)) {
+            Ok(value) => {
+                reads.answered += 1;
+                Ok(Some(value))
+            }
+            Err(error) if error.kind() == Kind::Failed => {
+                reads.warnings.push(format!("{what}: {error}"));
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl Session for T310Session {
+    fn status(&mut self) -> Result<Status> {
+        let mut reads = Reads::default();
+        let switches = self.read(
+            &mut reads,
+            "switches",
+            codec::SWITCHES,
+            &codec::SWITCH_QUERY,
+            codec::decode_switches,
+        )?;
+        let noise_control = self.read(
+            &mut reads,
+            "noise control",
+            codec::NOISE_CONTROL,
+            &codec::NOISE_MODE_QUERY,
+            codec::decode_noise_mode,
+        )?;
+        let battery = self.read(&mut reads, "battery", codec::BATTERY, &[], codec::decode_battery)?;
+        let eq = self.read(&mut reads, "EQ", codec::EQ_PRESET, &[], codec::decode_eq)?;
+        // No bass-level read: the T310 does not answer an empty 0x0124 (HW1). It returns with W6.
+        // Spec: realme_t310.md#bass-read
+        let codec = self.read(&mut reads, "codec", codec::CODEC, &[], codec::decode_codec)?;
+        let firmware = self.read(&mut reads, "firmware", codec::FIRMWARE, &[], codec::decode_firmware)?;
+
+        if reads.answered == 0 && !reads.warnings.is_empty() {
+            return Err(Error::Timeout(reads.warnings.join("; ")));
+        }
+        Ok(Status {
+            battery: battery.unwrap_or_default(),
+            noise_control,
+            eq,
+            bass_level: None,
+            switches: switches.unwrap_or_default(),
+            codec,
+            firmware,
+            warnings: reads.warnings,
+        })
+    }
+
+    fn touch_controls(&mut self) -> Result<TouchControls> {
+        if !self.commands.allows(codec::GESTURES) {
+            return Err(Error::Unsupported(
+                "these buds do not offer touch-control settings".to_owned(),
+            ));
+        }
+        let gestures = codec::decode_gestures(&self.link.request(codec::GESTURES, &[])?)?;
+        let mut reads = Reads::default();
+        let hold_cycle = self.read(
+            &mut reads,
+            "hold cycle",
+            codec::NOISE_CONTROL,
+            &codec::HOLD_CYCLE_QUERY,
+            codec::decode_hold_cycle,
+        )?;
+        Ok(TouchControls {
+            gestures,
+            hold_cycle,
+            warnings: reads.warnings,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::status::Charge;
+    use crate::transport::mock::{Script, Step, hex};
+
+    fn tx(cmd: u16, seq: u8, payload: &str) -> Step {
+        Step::Tx(frame::encode(cmd, seq, &hex(payload)).unwrap())
+    }
+
+    fn rx(cmd: u16, seq: u8, payload: &str) -> Step {
+        Step::Rx(frame::encode(cmd, seq, &hex(payload)).unwrap())
+    }
+
+    fn fixed_clock() -> u32 {
+        1_750_000_000
+    }
+
+    fn open(script: &Script) -> Result<T310Session> {
+        T310Session::open(Link::new(script.transport(), fixed_clock))
+    }
+
+    /// The handshake of the owner's T310 (HW1); seq 01-04 are used up.
+    fn handshake() -> Vec<Step> {
+        vec![
+            tx(0x0100, 0x01, ""),
+            rx(0x8100, 0x01, codec::T310_BITMAP_REPLY),
+            tx(0x0103, 0x02, ""),
+            rx(0x8103, 0x02, "00 12 3C 06"),
+            tx(0x0200, 0x03, ""),
+            rx(0x8200, 0x03, "00 09 01 02 03 04 05 06 0D F1 F4"),
+            tx(0x0205, 0x04, "04 01 02 03 04"),
+            rx(0x8205, 0x04, "00 04 01 00 02 00 03 00 04 00"),
+        ]
+    }
+
+    #[test]
+    fn full_status() {
+        let mut steps = handshake();
+        let mut firmware = String::from("00 03");
+        for byte in b"1,2,120,2,2,120,3,2,105" {
+            firmware.push_str(&format!(" {byte:02X}"));
+        }
+        steps.extend([
+            tx(0x010D, 0x05, "06 05 06 11 1A 1B 1D"),
+            rx(0x810D, 0x05, "00 06 05 00 06 00 11 01 1A 00 1B 01 1D 01"),
+            tx(0x010C, 0x06, "01 01"),
+            rx(0x810C, 0x06, "00 01 01 08"),
+            tx(0x0106, 0x07, ""),
+            rx(0x8106, 0x07, "00 03 01 50 02 E4 03 3C"),
+            tx(0x010F, 0x08, ""),
+            rx(0x810F, 0x08, "00 01"),
+            tx(0x0114, 0x09, ""),
+            rx(0x8114, 0x09, "00 02"),
+            tx(0x0105, 0x0A, ""),
+            rx(0x8105, 0x0A, &firmware),
+        ]);
+        let script = Script::new(steps);
+        let status = open(&script).unwrap().status().unwrap();
+        script.assert_done();
+
+        assert_eq!(
+            status.battery.left,
+            Some(Charge {
+                level: 80,
+                charging: false
+            })
+        );
+        assert_eq!(
+            status.battery.right,
+            Some(Charge {
+                level: 100,
+                charging: true
+            })
+        );
+        assert_eq!(
+            status.battery.case,
+            Some(Charge {
+                level: 60,
+                charging: false
+            })
+        );
+        let noise = status.noise_control.unwrap();
+        assert_eq!((noise.mode.as_str(), noise.level.as_deref()), ("anc", Some("deep")));
+        assert_eq!(status.eq.as_deref(), Some("deep-bass"));
+        assert_eq!(status.bass_level, None);
+        assert_eq!(status.codec.as_deref(), Some("AAC"));
+        assert_eq!(status.firmware.as_deref(), Some("120.120.105"));
+        let game = status.switches.iter().find(|s| s.key == "game").unwrap();
+        assert!(!game.on);
+        assert_eq!(status.switches.len(), 5);
+        assert!(status.warnings.is_empty());
+    }
+
+    #[test]
+    fn answers_the_time_request_during_the_settle() {
+        let mut steps = vec![
+            rx(0x0500, 0x01, ""),
+            Step::Tx(hex("AA 0C 00 00 00 85 01 05 00 00 80 E1 4E 68")),
+        ];
+        steps.extend(handshake());
+        // No 0x8205 ack this time: it may never arrive, and `open` does not wait for it.
+        // Spec: realme_t310.md#subscribe
+        steps.pop();
+        let script = Script::new(steps);
+        open(&script).unwrap();
+        script.assert_done();
+    }
+
+    #[test]
+    fn a_silent_handshake_reports_a_busy_channel() {
+        let script = Script::new(vec![tx(0x0100, 0x01, "")]);
+        assert!(matches!(open(&script), Err(Error::ChannelBusy(_))));
+    }
+
+    #[test]
+    fn other_models_are_refused() {
+        let script = Script::new(vec![
+            tx(0x0100, 0x01, ""),
+            rx(0x8100, 0x01, codec::T310_BITMAP_REPLY),
+            tx(0x0103, 0x02, ""),
+            rx(0x8103, 0x02, "00 14 54 06"),
+        ]);
+        match open(&script) {
+            Err(Error::WrongModel { found, .. }) => assert_eq!(found, "065414"),
+            other => panic!("expected WrongModel, got {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn commands_missing_from_the_bitmap_are_never_sent() {
+        // A bitmap with no bits: only always-allowed commands go out, and no subscription.
+        let script = Script::new(vec![
+            tx(0x0100, 0x01, ""),
+            rx(0x8100, 0x01, "00"),
+            tx(0x0103, 0x02, ""),
+            rx(0x8103, 0x02, "00 12 3C 06"),
+            tx(0x0200, 0x03, ""),
+            rx(0x8200, 0x03, "00 02 01 02"),
+            tx(0x010D, 0x04, "06 05 06 11 1A 1B 1D"),
+            rx(0x810D, 0x04, "00 01 06 01"),
+            tx(0x0106, 0x05, ""),
+            // no battery reply: becomes a warning
+        ]);
+        let status = open(&script).unwrap().status().unwrap();
+        script.assert_done();
+        assert_eq!(status.switches.len(), 1);
+        assert!(status.noise_control.is_none() && status.firmware.is_none());
+        assert_eq!(status.warnings.len(), 1);
+        assert!(status.warnings.first().unwrap().starts_with("battery"));
+    }
+
+    #[test]
+    fn a_lost_link_stops_the_status() {
+        let mut steps = handshake();
+        steps.extend([tx(0x010D, 0x05, "06 05 06 11 1A 1B 1D"), Step::Close]);
+        let script = Script::new(steps);
+        assert!(matches!(open(&script).unwrap().status(), Err(Error::NotConnected(_))));
+    }
+
+    #[test]
+    fn touch_controls_and_hold_cycle() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0108, 0x05, ""),
+            rx(0x8108, 0x05, "00 02 01 01 02 01 02 01 04 08"),
+            tx(0x010C, 0x06, "02 01"),
+            rx(0x810C, 0x06, "00 02 01 0A"),
+        ]);
+        let script = Script::new(steps);
+        let touch = open(&script).unwrap().touch_controls().unwrap();
+        script.assert_done();
+        assert_eq!(touch.gestures.len(), 2);
+        assert_eq!(touch.hold_cycle.unwrap(), ["transparency", "anc"]);
+    }
+
+    /// The owner's `budctl --debug touch` (HW1), byte for byte. The buds' own frames (slice
+    /// byte 08) arrive glued to replies and need no answer.
+    #[test]
+    fn replays_the_hw1_touch_session() {
+        let script = Script::new(vec![
+            Step::Tx(hex("AA 07 00 00 00 01 01 00 00")),
+            Step::Rx(hex(
+                "AA 10 00 00 00 81 01 09 00 00 BF 1F 5A 20 45 04 40 00 AA 07 08 00 01 05 0F 00 00",
+            )),
+            Step::Tx(hex("AA 07 00 00 03 01 02 00 00")),
+            Step::Rx(hex("AA 0B 00 00 03 81 02 04 00 00 12 3C 06")),
+            Step::Tx(hex("AA 07 00 00 00 02 03 00 00")),
+            Step::Rx(hex("AA 12 00 00 00 82 03 0B 00 00 09 01 02 03 04 05 06 0D F1 F4")),
+            Step::Tx(hex("AA 0C 00 00 05 02 04 05 00 04 01 02 03 04")),
+            Step::Rx(hex(
+                "AA 11 00 00 05 82 04 0A 00 00 04 01 00 02 00 03 00 04 00 AA 0F 08 00 04 02 10 08 00 01 03 02 64 01 64 03 00",
+            )),
+            Step::Tx(hex("AA 07 00 00 08 01 05 00 00")),
+            Step::Rx(hex(
+                "AA 21 00 00 08 81 05 1A 00 00 06 01 01 02 01 01 01 03 06 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08",
+            )),
+            Step::Tx(hex("AA 09 00 00 0C 01 06 02 00 02 01")),
+            Step::Rx(hex("AA 0B 00 00 0C 81 06 04 00 00 02 01 0A")),
+        ]);
+        let touch = open(&script).unwrap().touch_controls().unwrap();
+        script.assert_done();
+        let table: Vec<(&str, &str, &str)> = touch
+            .gestures
+            .iter()
+            .map(|g| (g.side.as_str(), g.gesture.as_str(), g.action.as_str()))
+            .collect();
+        assert_eq!(
+            table,
+            [
+                ("left", "double-tap", "play-pause"),
+                ("left", "triple-tap", "next"),
+                ("left", "hold", "noise-cycle"),
+                ("right", "double-tap", "play-pause"),
+                ("right", "triple-tap", "next"),
+                ("right", "hold", "noise-cycle"),
+            ]
+        );
+        assert_eq!(touch.hold_cycle.unwrap(), ["transparency", "anc"]);
+        assert!(touch.warnings.is_empty());
+    }
+}
