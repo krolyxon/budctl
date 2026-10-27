@@ -14,18 +14,25 @@ use crate::{Draft, Item, Marks, Message};
 const SAVING: &str = "Saving…";
 
 /// What the keyboard cursor can rest on, top to bottom, as [`view`] shows them: each preset,
-/// "New preset", then for each custom preset "Rename" and its bands.
+/// "New preset", then, when a custom preset is in use, "Rename", "Delete" and its bands.
 pub fn items(buds: &Buds) -> Vec<Item> {
     let mut items = Vec::new();
     if let Some(eq) = &buds.eq {
         items.extend(eq.presets.iter().map(|p| Item::Preset(p.id)));
         items.push(Item::NewPreset);
-        for preset in eq.presets.iter().filter(|p| p.custom) {
-            items.push(Item::Rename(preset.id));
+        if let Some(preset) = in_use(buds) {
+            items.extend([Item::Rename(preset.id), Item::Delete(preset.id)]);
             items.extend(preset.bands.iter().map(|band| Item::Band(preset.id, band.hz)));
         }
     }
     items
+}
+
+/// The custom preset in use, if one is: only its bands can be changed.
+pub fn in_use(buds: &Buds) -> Option<&EqPreset> {
+    let eq = buds.eq.as_ref()?;
+    let current = eq.current.as_deref()?;
+    eq.presets.iter().find(|p| p.custom && buds::key(p) == current)
 }
 
 /// `draft`: bands moved on the screen and not saved on the buds yet.
@@ -66,13 +73,17 @@ pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a Draft>, marks: Mar
             )
         })
         .collect();
-    eq.presets
-        .iter()
-        .filter(|p| p.custom)
-        .fold(
-            column![title, ui::card(look, rows), new_preset(look, marks)].spacing(18),
-            |page, preset| page.push(bands(look, preset, draft, marks)),
-        )
+    let editor = match in_use(buds) {
+        Some(preset) => bands(look, preset, draft, marks),
+        None => {
+            let note = text("Built-in presets cannot be changed. Pick one of your presets to change its bands.")
+                .size(14)
+                .color(look.p.dim);
+            ui::panel(look, note.into())
+        }
+    };
+    column![title, ui::card(look, rows), new_preset(look, marks), editor]
+        .spacing(18)
         .into()
 }
 
@@ -128,6 +139,13 @@ fn bands<'a>(look: Look, preset: &'a EqPreset, draft: Option<&'a Draft>, marks: 
         false,
         marks.focus == Some(Item::Rename(id)),
         Message::RenamePreset(id),
+    ))
+    .push(ui::pill_with(
+        look,
+        "Delete",
+        false,
+        marks.focus == Some(Item::Delete(id)),
+        Message::DeletePreset(id),
     ))
     .spacing(10)
     .align_y(Alignment::Center);
@@ -203,12 +221,17 @@ mod tests {
     #[test]
     fn items_follow_the_page() {
         let items = items(&buds::demo());
-        assert_eq!(items.len(), 5 + 1 + 1 + 6);
+        assert_eq!(items.len(), 5 + 1 + 2 + 6);
         assert_eq!(items.first(), Some(&Item::Preset(0)));
         assert_eq!(items.get(5), Some(&Item::NewPreset));
         assert_eq!(items.get(6), Some(&Item::Rename(4)));
-        assert_eq!(items.get(7), Some(&Item::Band(4, 50)));
+        assert_eq!(items.get(7), Some(&Item::Delete(4)));
+        assert_eq!(items.get(8), Some(&Item::Band(4, 50)));
         assert_eq!(items.last(), Some(&Item::Band(4, 16000)));
+        // With a built-in preset in use, there is nothing to edit.
+        let mut buds = buds::demo();
+        buds.set_eq("pure-bass".to_owned());
+        assert_eq!(super::items(&buds).last(), Some(&Item::NewPreset));
         assert!(super::items(&buds::unknown()).is_empty());
     }
 

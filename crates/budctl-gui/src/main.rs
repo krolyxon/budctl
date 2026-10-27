@@ -198,6 +198,8 @@ enum Item {
     NewPreset,
     /// "Rename", on a custom EQ preset's card.
     Rename(u8),
+    /// "Delete", on a custom EQ preset's card.
+    Delete(u8),
 }
 
 /// The dialog that asks for a preset's name.
@@ -297,6 +299,10 @@ enum Message {
     NameInput(String),
     SubmitName,
     CancelName,
+    /// Delete a custom preset (by its id), after a confirmation.
+    DeletePreset(u8),
+    /// The answer to "Delete the preset?".
+    ConfirmDelete(bool),
     ShowHelp,
     /// Read the buds again.
     Refresh,
@@ -348,6 +354,8 @@ struct App {
     palette_problem: Option<String>,
     /// The preset-name dialog, when it is open.
     prompt: Option<NamePrompt>,
+    /// "Delete the preset?" is open, for this preset.
+    confirm_delete: Option<u8>,
 }
 
 impl App {
@@ -386,6 +394,7 @@ impl App {
             confirm_find: false,
             palette_problem: None,
             prompt: None,
+            confirm_delete: None,
         };
         app.refresh_palette();
         app
@@ -441,6 +450,16 @@ impl App {
             }
             Message::SubmitName => self.submit_name(),
             Message::CancelName => self.prompt = None,
+            Message::DeletePreset(id) => self.confirm_delete = Some(id),
+            Message::ConfirmDelete(yes) => {
+                if let (true, Some(id)) = (yes, self.confirm_delete.take())
+                    && let Some(preset) = self.buds.preset(id)
+                {
+                    let command = Command::DeleteEq(buds::key(preset));
+                    self.write(Item::Preset(id), command);
+                }
+                self.confirm_delete = None;
+            }
             Message::Refresh => self.refresh(),
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
@@ -519,6 +538,16 @@ impl App {
                             range: model.range,
                         });
                     }
+                }
+                Command::DeleteEq(_) => {
+                    let id = item_preset(item);
+                    if let Some(eq) = &mut self.buds.eq {
+                        eq.presets.retain(|p| !(p.custom && p.id == id));
+                    }
+                    if self.buds.status.eq.as_deref() == Some(&format!("custom-{id}")) {
+                        self.buds.set_eq("pure-raw".to_owned());
+                    }
+                    self.draft = None;
                 }
                 Command::RenameEq(_, name) => {
                     if let Some(preset) = self.buds.preset(item_preset(item)) {
@@ -893,6 +922,11 @@ impl App {
     }
 
     fn key(&mut self, key: &Key, modifiers: Modifiers) -> Task<Message> {
+        if self.confirm_delete.is_some() {
+            // Only Enter deletes; any other key says no.
+            let yes = matches!(key, Key::Named(keyboard::key::Named::Enter));
+            return self.update(Message::ConfirmDelete(yes));
+        }
         if self.prompt.is_some() {
             // The name field takes the keys, and Enter in it; only Esc is ours.
             if matches!(key, Key::Named(keyboard::key::Named::Escape)) {
@@ -1058,6 +1092,7 @@ impl App {
             Item::Find => (action != Action::Left).then_some(Message::Find),
             Item::NewPreset => (action != Action::Left).then_some(Message::NewPreset),
             Item::Rename(id) => (action != Action::Left).then_some(Message::RenamePreset(id)),
+            Item::Delete(id) => (action != Action::Left).then_some(Message::DeletePreset(id)),
             Item::Bass => {
                 let (low, high) = self.buds.bass_range?;
                 let now = self.bass_draft.or(self.buds.bass);
@@ -1207,6 +1242,8 @@ impl App {
             stack![window, self.confirm_find()].into()
         } else if let Some(prompt) = &self.prompt {
             stack![window, self.name_prompt(prompt)].into()
+        } else if let Some(id) = self.confirm_delete {
+            stack![window, self.confirm_delete(id)].into()
         } else {
             window.into()
         }
@@ -1349,6 +1386,37 @@ impl App {
         .spacing(10);
         let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
         let backdrop = container(container(dialog).width(480))
+            .center(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
+                ..container::Style::default()
+            });
+        opaque(backdrop)
+    }
+
+    /// "Delete the preset?", over a dimmed window: its bands are lost.
+    fn confirm_delete(&self, id: u8) -> Element<'_, Message> {
+        let look = self.look;
+        let p = look.p;
+        let name = self
+            .buds
+            .preset(id)
+            .map_or("this preset", |preset| preset.name.as_str());
+        let words = column![
+            text(format!("Delete {name}?")).size(22).font(look.bold()).color(p.fg),
+            text("Its bands are lost. The buds keep their other presets.")
+                .size(14)
+                .color(p.dim),
+        ]
+        .spacing(8);
+        let buttons = row![
+            space::horizontal(),
+            ui::pill(look, "Cancel", false, Message::ConfirmDelete(false)),
+            ui::pill(look, "Delete", true, Message::ConfirmDelete(true)),
+        ]
+        .spacing(10);
+        let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
+        let backdrop = container(container(dialog).width(460))
             .center(Length::Fill)
             .style(|_| container::Style {
                 background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
@@ -1787,11 +1855,12 @@ mod tests {
         press(&mut app, "j l");
         assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
         assert_eq!(app.buds.eq_name(), "Pure raw");
+        // Back to Custom1, the fifth preset: its bands come back.
+        press(&mut app, "j j j j l");
+        assert_eq!(app.buds.status.eq.as_deref(), Some("custom-4"));
         press(&mut app, "G");
         assert_eq!(app.focus(), Some(Item::Band(4, 16000)));
-        // Moving a band saves the custom preset, which also selects it.
         press(&mut app, "l");
-        assert_eq!(app.buds.status.eq.as_deref(), Some("custom-4"));
         let last = |app: &App| app.buds.preset(4).unwrap().bands.last().unwrap().gain;
         assert_eq!(last(&app), 3);
         press(&mut app, "l l l l l");
@@ -2023,6 +2092,36 @@ mod tests {
     }
 
     #[test]
+    fn presets_are_deleted_after_a_yes() {
+        let mut app = app();
+        let _ = app.update(Message::DeletePreset(4));
+        assert_eq!(app.confirm_delete, Some(4));
+        press(&mut app, "j");
+        assert_eq!(app.confirm_delete, None, "any other key says no");
+        assert!(app.buds.preset(4).is_some());
+        let _ = app.update(Message::DeletePreset(4));
+        press(&mut app, "Enter");
+        assert!(app.buds.preset(4).is_none());
+        assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
+
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::DeletePreset(4));
+        let _ = app.update(Message::ConfirmDelete(true));
+        assert!(matches!(commands.try_recv(), Ok(Command::DeleteEq(preset)) if preset == "custom-4"));
+        assert_eq!(app.pending(), [Item::Preset(4)]);
+    }
+
+    #[test]
+    fn only_the_preset_in_use_shows_its_bands() {
+        let mut app = app();
+        press(&mut app, "J j l");
+        assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
+        assert!(!app.items().iter().any(|item| matches!(item, Item::Band(..))));
+    }
+
+    #[test]
     fn steps() {
         let abc = ['a', 'b', 'c'];
         assert_eq!(step(&abc, Some(0), Action::Left), None);
@@ -2086,6 +2185,10 @@ mod tests {
         let _ = naming.update(Message::NameInput("Custom1 ".to_owned()));
         let _ = naming.update(Message::SubmitName);
         shots.push(("name-prompt".to_owned(), 800.0, naming));
+        shots.push(("equalizer-builtin".to_owned(), 1000.0, on(Page::Equalizer, "j l")));
+        let mut deleting = on(Page::Equalizer, "");
+        let _ = deleting.update(Message::DeletePreset(4));
+        shots.push(("delete-confirm".to_owned(), 800.0, deleting));
         let mut connecting = App::new(palette.clone(), font, None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));

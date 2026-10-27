@@ -52,6 +52,8 @@ pub enum Command {
     CreateEq(String),
     /// Give a custom EQ preset (`custom-<id>`) a new name.
     RenameEq(String, String),
+    /// Delete a custom EQ preset (`custom-<id>`).
+    DeleteEq(String),
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +80,8 @@ pub enum Event {
     Ringing(bool),
     /// The answer to [`Command::Bass`]: the level the buds took.
     Bass(i8),
-    /// The answer to [`Command::CreateEq`]: the whole preset list after it (ids can change).
+    /// The answer to [`Command::CreateEq`] and [`Command::DeleteEq`]: the whole preset list after
+    /// it (ids can change).
     Presets(EqPresets),
     /// The answer to a command that failed. The session is closed; the next command opens a
     /// new one.
@@ -223,6 +226,13 @@ impl Worker {
                 .session()
                 .and_then(|session| {
                     session.create_custom_eq(&name)?;
+                    session.eq_presets()
+                })
+                .map(Event::Presets),
+            Command::DeleteEq(preset) => self
+                .session()
+                .and_then(|session| {
+                    session.delete_custom_eq(&preset)?;
                     session.eq_presets()
                 })
                 .map(Event::Presets),
