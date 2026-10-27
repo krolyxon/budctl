@@ -33,7 +33,7 @@ Every fact carries an evidence level that says how far it can be trusted. A fact
   1. `0000079A-D102-11E1-9B23-00025B00A5A5`. The vendor app tries it first. *buds4/vendor*
   2. `00001107-D102-11E1-9B23-00025B00A5A5`. It is kept for other models; on Buds 4 it never connects.
 - **Fixed channel.** Android clients sometimes use a fixed channel 15. budctl does not use a fixed channel.
-- **One client at a time.** The buds serve one control app at a time. budctl reports a busy channel instead of retrying.
+- **One client per host.** On one host, only one socket can hold the control channel: a second one gets `EBUSY` (HW1), and budctl reports a busy channel instead of retrying. Across hosts, the owner's T310 served the laptop and a control app on the phone at the same time, with dual connection on (*ours-2026-10-27*, [question 4](#open)).
 - **Lid close.** Closing the case lid ends the link. *buds4*
 
 <a id="frame"></a>
@@ -518,7 +518,7 @@ Evidence: *vendor*
 1. ~~Which service UUID the T310 offers, and its RFCOMM channel.~~ Answered at HW1: `0000079a-d102-11e1-9b23-00025b00a5a5` on channel 6.
 2. ~~The real bitmap bytes, the product-id reply and the offered events.~~ Answered at HW1; see [§5](#bitmap-t310) and [§6](#events-offered).
 3. Partly answered at HW1: no `0x0500`, but an unanswered `0x0501` with no reset ([§7](#buds-requests)). `F2`/`F4` were offered but not subscribed, so none arrived. What `0x0501` asks for is unknown.
-4. What "busy" looks like when the phone holds the channel: the connect is refused, the connect succeeds and the buds stay silent, or the buds drop the laptop's link. A local holder gives `EBUSY` (HW1). Until the phone case is tested, budctl also treats a silent handshake as "channel busy" (exit 3).
+4. Mostly answered (2026-10-27): with dual connection on and a control app connected on the phone, budctl's `status` got every reply, and changes budctl made showed up in the phone app. So the phone does not make the channel busy. A local holder gives `EBUSY` (HW1). With dual connection off, the phone takes the laptop's whole link (exit 2, HW1); whether a phone app ever leaves the buds silent is unknown, so budctl still treats a silent handshake as "channel busy" (exit 3).
 5. The width of the noise-control value: one byte so far, on reads and writes. `08` is the deep level: light, medium and deep read back as `04`, `10` and `08` (W2).
 6. ~~Whether the T310 answers id `1A` (wind).~~ It does (HW1). What id `05` means is still open: it reads `00`.
 7. How long after the game-mode ack the new value shows up in `0x010D`: at most 1 s on the T310 (W3). Whether it is sooner was not measured.
@@ -559,6 +559,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | `status` with a control app connected on the phone, dual connection on | pass | Every read answered, 40-190 ms after its request (HW1: 50-90 ms). Changes budctl made showed up in the phone app. The T310 serves both hosts at once. See [question 4](#open) |
 | 2026-10-27 | W11b `eq custom-4`, `eq custom-4 50=+3 16000=-2`, then `50=0 16000=0` | pass | The write matched the derived frame, was acked with `00 04` and read back on the first try. The preset is flat again. Then `eq pure-raw`, `eq custom-4` and `status`: `status` showed `custom-4`, so saving also selects. See [§10.9](#custom-eq-save) |
 | 2026-10-27 | W6b `bass -5`, `bass 5`, `bass 0` (bass boost off) | pass (protocol) | All acked with `0x841B 00`. No read-back is possible. By ear, at most a slight difference. See [§10.4](#bass-write) |
 | 2026-10-27 | W11a `eq` (custom list `0x0122`) | pass | One preset, "Custom1" (id `04`, 6 flat bands from 50 Hz), and it is the EQ in use. See [§10.9](#custom-eq) |
