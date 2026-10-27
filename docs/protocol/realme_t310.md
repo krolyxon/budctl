@@ -511,9 +511,10 @@ Evidence: *vendor*
     - **Expected frame** (*derived*), for `eq new Test` on the owner's list, with seq `06`: `AA 23 00 00 18 04 06 1C 00 01 FA 06 00 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00`.
     - **On the owner's T310** (*ours-2026-10-28*, W11c): that frame went out byte for byte. The buds answered `0x8418 00 05` within 50 ms. The list read 150 ms after the ack had two presets: Custom1 (id `04`, unchanged, `selected` `00`) and Test (id `05`, the six bands at 0 dB, `selected` `01`). So the reply's id was the listed id: no renumbering on this create.
   - <a id="custom-eq-rename"></a>**W11d, rename**, wanted by the owner (2026-10-28): `budctl eq rename custom-<id> <name>` reads the list and saves (`02`) the preset as listed with only its name changed. The name follows the [create](#custom-eq-create) rules, and another preset's name is refused before anything is sent. Like any save, a rename also selects the preset.
-    - **Evidence:** *derived*. A save carries the name, and W11b saved the name back unchanged. That a save with a different name renames the preset in place, under the same id, is what this checkpoint tests.
+    - **Evidence:** *ours-2026-10-28* (W11d). A save carries the name; one with a different name renames the preset in place, under the same id.
     - **Check:** read the list again, as for [read-back](#write-read-back). The preset with that id must have the new name.
     - **Expected frame** (*derived*), for `eq rename custom-5 Gym` on the owner's list after W11c, with seq `06`: `AA 22 00 00 18 04 06 1B 00 02 FA 06 05 03 47 79 6D 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00`.
+    - **On the owner's T310** (*ours-2026-10-28*, W11d): that frame went out byte for byte, and the buds answered `0x8418 00 05` within 100 ms. The list read 100 ms after the ack has id `05` named "Gym", with the same flat bands and `selected` `01`; Custom1 is unchanged.
   - Deleting (`03`) comes later, if it is wanted.
 
 <a id="absent"></a>
@@ -570,6 +571,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-28 | W11d `eq rename custom-5 Gym` | pass | The save with the new name matched the derived frame byte for byte, and was acked with `00 05`. The list read back at once has id `05` named Gym, bands unchanged, in use. See [§10.9](#custom-eq-rename) |
 | 2026-10-28 | W11c `eq new Test` | pass | The create frame matched the derived one byte for byte, and was acked with `00 05`. The list read back at once has Test as id `05`, flat, and in use. See [§10.9](#custom-eq-create) |
 | 2026-10-27 | G5 `budctl-gui --debug`, Gestures page: left triple tap by dropdown and by `h`/`l`, transparency into the hold cycle and out | pass (protocol) | Every `0x0401` write (`06`, `03`, `0B`, `03`, `06`, then `05` to restore it) and both `0x0404 02 01` writes (`0B`, `09`) were acked and read back on the first try. Keys pressed during a write went out one by one as each write finished, and the last one was read back. A session closed after 10 s idle; the next pick opened a new one and wrote at once |
 | 2026-10-27 | G4 `budctl-gui --debug`, Equalizer page: the four built-in presets, a band drag on Custom1, then idle | pass (protocol) | `0x0406 00/01/02/03` were acked and read back on the first try. One drag (1 kHz from −6 to +3) sent one `0x0418 02` write: acked `00 04`, and the read-back list shows the new gain with `selected` `01`. The session closed 10 s after the last command, three times; a read when the window got focus after 30 s opened a new session each time. `h`/`l` on a band is not covered yet |
