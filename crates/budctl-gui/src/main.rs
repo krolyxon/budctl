@@ -400,7 +400,11 @@ impl App {
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
                 self.refresh_palette();
-                if self.read_at.is_some_and(|at| at.elapsed() >= STALE) && self.in_flight.is_empty() {
+                // The phone may have changed something, or the buds may be back: read again
+                // when the reading is old or the last command failed.
+                let stale = self.read_at.is_some_and(|at| at.elapsed() >= STALE);
+                let failed = matches!(self.link, Link::Failed { .. });
+                if (stale || failed) && self.in_flight.is_empty() {
                     self.refresh();
                 }
             }
@@ -1488,6 +1492,23 @@ mod tests {
         assert_eq!(app.buds.name, "realme Buds T310");
         assert!(app.buds.connected);
         assert_eq!(app.items().len(), 10);
+    }
+
+    #[test]
+    fn focus_tries_again_after_a_failure() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Failed {
+            kind: Kind::NotFound,
+            message: "realme Buds T310 is paired but not connected".to_owned(),
+        }));
+        let _ = app.update(Message::Focused);
+        assert!(matches!(commands.try_recv(), Ok(Command::Read)));
+        assert_eq!(app.link, Link::Connecting);
+        // A fresh reading is not read again on focus.
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::Focused);
+        assert!(commands.try_recv().is_err());
     }
 
     #[test]
