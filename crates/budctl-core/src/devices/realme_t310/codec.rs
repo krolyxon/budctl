@@ -27,6 +27,8 @@ pub(super) const SWITCH_WRITE: u16 = 0x0403;
 pub(super) const EQ_SELECT: u16 = 0x0406;
 /// Spec: realme_t310.md#find
 pub(super) const FIND: u16 = 0x0400;
+/// Spec: realme_t310.md#gesture-write
+pub(super) const GESTURE_WRITE: u16 = 0x0401;
 
 /// `01` starts ringing, `00` stops it. Spec: realme_t310.md#find
 pub(super) fn find_payload(ring: bool) -> [u8; 1] {
@@ -421,20 +423,128 @@ pub(super) fn decode_bass_level(reply: &[u8]) -> Result<i8> {
     Ok(level)
 }
 
+/// One gesture-table entry: `<dev> <btn> <act> <fn>`. Spec: realme_t310.md#gestures
+pub(super) type GestureEntry = [u8; 4];
+
+/// The entries of a gesture-table reply, in the order the buds sent them.
+/// Spec: realme_t310.md#gestures
+pub(super) fn decode_gesture_entries(reply: &[u8]) -> Result<Vec<GestureEntry>> {
+    let mut r = ok_reply(reply, "the gesture table")?;
+    let mut entries = Vec::new();
+    for _ in 0..r.u8()? {
+        entries.push([r.u8()?, r.u8()?, r.u8()?, r.u8()?]);
+    }
+    Ok(entries)
+}
+
+/// Spec: realme_t310.md#gestures
+pub(super) fn name_gesture(&[side, group, act, function]: &GestureEntry) -> Gesture {
+    Gesture {
+        side: name_of(&SIDES, side).map_or_else(|| format!("device-0x{side:02X}"), str::to_owned),
+        gesture: name_of(&ACTS, act).map_or_else(|| format!("act-0x{act:02X}"), str::to_owned),
+        action: name_of(&FUNCTIONS, function).map_or_else(|| format!("fn-0x{function:02X}"), str::to_owned),
+        group: (group != MAIN_GROUP).then_some(group),
+    }
+}
+
 /// Spec: realme_t310.md#gestures
 pub(super) fn decode_gestures(reply: &[u8]) -> Result<Vec<Gesture>> {
-    let mut r = ok_reply(reply, "the gesture table")?;
-    let mut gestures = Vec::new();
-    for _ in 0..r.u8()? {
-        let [side, group, act, function] = [r.u8()?, r.u8()?, r.u8()?, r.u8()?];
-        gestures.push(Gesture {
-            side: name_of(&SIDES, side).map_or_else(|| format!("device-0x{side:02X}"), str::to_owned),
-            gesture: name_of(&ACTS, act).map_or_else(|| format!("act-0x{act:02X}"), str::to_owned),
-            action: name_of(&FUNCTIONS, function).map_or_else(|| format!("fn-0x{function:02X}"), str::to_owned),
-            group: (group != MAIN_GROUP).then_some(group),
-        });
+    Ok(decode_gesture_entries(reply)?.iter().map(name_gesture).collect())
+}
+
+/// What `touch <side>` changes: `both` is the left and the right bud's entry.
+/// Spec: realme_t310.md#gesture-choices
+const TOUCH_SIDES: [(&str, &[u8]); 3] = [("left", &[0x01]), ("right", &[0x02]), ("both", &[0x01, 0x02])];
+
+/// The actions realme Link offers per gesture on the T310, in its order. budctl offers no
+/// others. Spec: realme_t310.md#gesture-choices
+const TOUCH_CHOICES: [(u8, &[u8]); 3] = [
+    // double tap: none, play/pause, next, voice assistant
+    (0x02, &[0x00, 0x01, 0x06, 0x03]),
+    // triple tap: none, previous, next, voice assistant, volume up, volume down, game mode
+    (0x03, &[0x00, 0x05, 0x06, 0x03, 0x0B, 0x0C, 0x11]),
+    // hold: none, noise-control cycle, voice assistant, game mode
+    (0x04, &[0x00, 0x08, 0x03, 0x11]),
+];
+
+/// A checked `touch <side> <gesture> <action>`: the bud ids, the act and the fn to write.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct TouchTarget {
+    pub(super) devices: &'static [u8],
+    pub(super) act: u8,
+    pub(super) function: u8,
+}
+
+/// Check the names against what the T310 offers. Every failure is a usage error that lists
+/// the valid names. Spec: realme_t310.md#gesture-choices
+pub(super) fn touch_target(side: &str, gesture: &str, action: &str) -> Result<TouchTarget> {
+    let list = |names: Vec<&str>| names.join(", ");
+    let Some(&(_, devices)) = TOUCH_SIDES.iter().find(|(name, _)| *name == side) else {
+        return Err(Error::Usage(format!(
+            "no side called {side}; use one of: {}",
+            list(TOUCH_SIDES.iter().map(|(name, _)| *name).collect())
+        )));
+    };
+    let gesture_names = || {
+        list(
+            TOUCH_CHOICES
+                .iter()
+                .filter_map(|(act, _)| name_of(&ACTS, *act))
+                .collect(),
+        )
+    };
+    let Some(&(act, choices)) = TOUCH_CHOICES
+        .iter()
+        .find(|(act, _)| name_of(&ACTS, *act) == Some(gesture))
+    else {
+        return Err(Error::Usage(format!(
+            "these buds have no {gesture} gesture to set; use one of: {}",
+            gesture_names()
+        )));
+    };
+    let Some(&function) = choices.iter().find(|f| name_of(&FUNCTIONS, **f) == Some(action)) else {
+        return Err(Error::Usage(format!(
+            "{gesture} cannot be set to {action} on these buds; use one of: {}",
+            list(choices.iter().filter_map(|f| name_of(&FUNCTIONS, *f)).collect())
+        )));
+    };
+    Ok(TouchTarget { devices, act, function })
+}
+
+/// The table with the target's entries changed, and nothing else. Every targeted entry must
+/// already be in the table: budctl never adds entries. Spec: realme_t310.md#gesture-write
+pub(super) fn retarget_gestures(table: &[GestureEntry], target: &TouchTarget) -> Result<Vec<GestureEntry>> {
+    for &device in target.devices {
+        if !table
+            .iter()
+            .any(|&[d, group, act, _]| d == device && group == MAIN_GROUP && act == target.act)
+        {
+            let entry = name_gesture(&[device, MAIN_GROUP, target.act, 0]);
+            return Err(Error::Unsupported(format!(
+                "the buds report no {} {} entry, so budctl will not write one",
+                entry.side, entry.gesture
+            )));
+        }
     }
-    Ok(gestures)
+    Ok(table
+        .iter()
+        .map(|&[device, group, act, function]| {
+            if target.devices.contains(&device) && group == MAIN_GROUP && act == target.act {
+                [device, group, act, target.function]
+            } else {
+                [device, group, act, function]
+            }
+        })
+        .collect())
+}
+
+/// `<count> (<dev> <btn> <act> <fn>)…`: the whole table. Spec: realme_t310.md#gesture-write
+pub(super) fn gesture_write_payload(table: &[GestureEntry]) -> Result<Vec<u8>> {
+    let count = u8::try_from(table.len())
+        .map_err(|_| Error::Protocol(format!("a gesture table of {} entries does not fit", table.len())))?;
+    let mut payload = vec![count];
+    payload.extend(table.iter().flatten());
+    Ok(payload)
 }
 
 /// The handshake reply of the owner's T310 (HW1). Spec: realme_t310.md#bitmap-t310
@@ -662,5 +772,69 @@ mod tests {
         let odd = decode_gestures(&hex("00 01 09 01 07 42")).unwrap();
         assert_eq!(odd.first().map(|g| g.action.as_str()), Some("fn-0x42"));
         assert!(decode_gestures(&hex("00 02 01 01 02 01")).is_err());
+    }
+
+    /// The owner's table (HW1): per bud, double tap play/pause, triple tap next, hold cycle.
+    const HW1_GESTURES: &str = "00 06 01 01 02 01 01 01 03 06 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08";
+
+    #[test]
+    fn touch_targets_follow_the_t310_choices() {
+        assert_eq!(
+            touch_target("left", "triple-tap", "volume-up").unwrap(),
+            TouchTarget {
+                devices: &[0x01],
+                act: 0x03,
+                function: 0x0B
+            }
+        );
+        assert_eq!(touch_target("both", "hold", "none").unwrap().devices, [0x01, 0x02]);
+        let usage = |side, gesture, action| match touch_target(side, gesture, action) {
+            Err(Error::Usage(message)) => message,
+            other => panic!("expected a usage error, got {other:?}"),
+        };
+        assert!(usage("middle", "hold", "none").contains("left, right, both"));
+        assert!(usage("left", "single-tap", "none").contains("double-tap, triple-tap, hold"));
+        // Offered by the family, but not by realme Link for this gesture.
+        assert!(usage("left", "double-tap", "volume-up").contains("none, play-pause, next, voice-assistant"));
+        assert!(usage("left", "hold", "previous").contains("none, noise-cycle, voice-assistant, game-mode"));
+    }
+
+    #[test]
+    fn retargeting_changes_only_the_targeted_entries() {
+        let table = decode_gesture_entries(&hex(HW1_GESTURES)).unwrap();
+        let left = touch_target("left", "triple-tap", "volume-up").unwrap();
+        let payload = gesture_write_payload(&retarget_gestures(&table, &left).unwrap()).unwrap();
+        assert_eq!(
+            payload,
+            hex("06 01 01 02 01 01 01 03 0B 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08")
+        );
+        // The frame the spec gives for this change (realme_t310.md#gesture-write).
+        let frame = crate::devices::realme_t310::frame::encode(GESTURE_WRITE, 0x06, &payload).unwrap();
+        assert_eq!(
+            crate::debug::hex(&frame),
+            "AA 20 00 00 01 04 06 19 00 06 01 01 02 01 01 01 03 0B 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08"
+        );
+        let both = touch_target("both", "hold", "game-mode").unwrap();
+        let payload = gesture_write_payload(&retarget_gestures(&table, &both).unwrap()).unwrap();
+        assert_eq!(
+            payload,
+            hex("06 01 01 02 01 01 01 03 06 01 01 04 11 02 01 02 01 02 01 03 06 02 01 04 11")
+        );
+        // Unchanged, the payload is the reply without its status byte.
+        let same = touch_target("right", "double-tap", "play-pause").unwrap();
+        let payload = gesture_write_payload(&retarget_gestures(&table, &same).unwrap()).unwrap();
+        assert_eq!(payload, hex(HW1_GESTURES).get(1..).unwrap());
+    }
+
+    #[test]
+    fn entries_the_buds_did_not_report_are_never_written() {
+        // Only the left bud's entries.
+        let table = decode_gesture_entries(&hex("00 03 01 01 02 01 01 01 03 06 01 01 04 08")).unwrap();
+        let both = touch_target("both", "hold", "none").unwrap();
+        assert!(matches!(retarget_gestures(&table, &both), Err(Error::Unsupported(_))));
+        // An on-call row (group 06) is not a main-group entry.
+        let table = decode_gesture_entries(&hex("00 01 01 06 02 1D")).unwrap();
+        let left = touch_target("left", "double-tap", "none").unwrap();
+        assert!(matches!(retarget_gestures(&table, &left), Err(Error::Unsupported(_))));
     }
 }

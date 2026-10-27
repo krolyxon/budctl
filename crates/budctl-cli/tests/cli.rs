@@ -32,3 +32,16 @@ fn find_start_needs_yes_before_connecting() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--yes"));
 }
+
+#[test]
+fn touch_changes_need_side_gesture_and_action() {
+    for args in [
+        &["touch", "left"][..],
+        &["touch", "left", "hold"],
+        &["touch", "--dry-run"],
+        &["touch", "middle", "hold", "none"],
+    ] {
+        let out = budctl(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+    }
+}

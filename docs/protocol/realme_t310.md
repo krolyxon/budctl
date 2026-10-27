@@ -339,7 +339,7 @@ Evidence: *vendor*; the T310's command set lists it.
   | `1C` | decline call |
   | `1D` | answer/end call |
 
-- **What realme Link offers for the T310** (*vendor*). Each bud is set on its own, as `dev` 01/02 with `btn` 01:
+- <a id="gesture-choices"></a>**What realme Link offers for the T310** (*vendor*). Each bud is set on its own, as `dev` 01/02 with `btn` 01. budctl offers exactly these choices and no others, although the family defines more `fn` values. `budctl touch both …` changes the left and the right bud's entry in one write; it never writes a `dev 04` row.
 
   | Gesture | Choices |
   |---|---|
@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*). Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*); [§10.6](#gesture-write) touch controls (W8, verified *ours-2026-10-27*). Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -428,9 +428,18 @@ Evidence: *buds4*
 The command and layout are *buds4*; the realme rules are *vendor*.
 
 - **Whole table.** The write carries the whole table. Start from a table read in the same session and change only the targeted entries.
-- **Reply:** `0x8401 00`.
+- **Reply:** `0x8401 00`. On the owner's T310 (*ours-2026-10-27*, W8), the `00` is followed by the table **as it was before the write**, cut to the length of the write's payload: 25 bytes, so the last `fn` byte is missing. budctl checks only the status byte, and reads the table back to see the change.
 - **Check:** read `0x0108` again after about 600 ms and compare.
 - **Wrong command ids fail silently.** For example, `0x0402` gets no reply at all.
+- **What budctl does** (budctl's own policy, not a protocol fact):
+  - It checks the side, gesture and action against [the T310's choices](#gesture-choices) before it sends anything.
+  - It reads `0x0108` and changes the `fn` byte of the targeted `btn 01` entries only. Every other byte, including the order of the entries, is copied from the reply. The payload is the reply without its status byte.
+  - It never adds an entry: if the buds did not report the targeted entry, it refuses.
+  - If the entry already has the action, it sends nothing.
+  - `--dry-run` reads the table and prints the payload it would send, then stops.
+  - After the ack it reads the table back 600 ms later, then every 300 ms until 2 s after the ack ([read-back](#write-read-back)).
+- **On the owner's T310** (*ours-2026-10-27*, W8): `touch left triple-tap volume-up` sent exactly the expected frame below. The ack came within 25 ms, and the first read-back (600 ms after the ack) already showed `fn 0B`. A second write, `volume-up` → `previous` (`fn 05`), behaved the same way. No push came. Not yet confirmed by ear: that the new triple tap really changes the volume or track.
+- **Expected frame** (*derived*, matched on the wire at W8), for `touch left triple-tap volume-up` on the owner's HW1 table, with seq `06`: `AA 20 00 00 01 04 06 19 00 06 01 01 02 01 01 01 03 0B 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08`.
 
 <a id="hold-cycle-write"></a>
 ### 10.7 Hold cycle: `0x0404 02 01 <mask>`
@@ -517,6 +526,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W8 `touch left triple-tap volume-up` (`--dry-run`, then sent), then `previous` | pass (protocol) | The dry run's payload matched the derived frame. Both writes were acked and read back on the first try, 600 ms after the ack. The ack echoes the old table, cut short. Not yet confirmed by ear. The left triple tap is now `previous`. See [§10.6](#gesture-write) |
 | 2026-10-27 | W7 `find start --yes`, `find stop` | pass | Both acked. Both buds rang, kept ringing after budctl disconnected, and stopped on `find stop`. See [§10.5](#find) |
 | 2026-10-27 | W5d `set dual on`, `off` | pass | Acked, the immediate read-back showed the change, and the laptop stayed connected. Only one host was connected. See [§10.2](#switch-write) |
 | 2026-10-27 | W5c `set wind off`, `on` | pass (protocol) | Acked, and the immediate read-back showed the change. Not audible in music. See [§10.2](#switch-write) |

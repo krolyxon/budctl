@@ -6,7 +6,7 @@
 use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
-use crate::status::{NoiseControl, NoiseMode, Status, Switch, TouchControls};
+use crate::status::{NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
 use crate::transport::Transport;
 
 pub mod realme_t310;
@@ -64,6 +64,14 @@ pub trait Session: Send {
     /// Turn an on/off setting ([`Switch::key`]) on or off, then read it back.
     fn set_switch(&mut self, key: &str, _on: bool) -> Result<Switch> {
         Err(Error::Unsupported(format!("budctl cannot change {key} on these buds")))
+    }
+
+    /// Give a touch gesture a new action, on `side` (`left`, `right` or `both`), then read the
+    /// table back. With `dry_run`, read the table and work out the write, but send nothing.
+    fn set_touch(&mut self, _side: &str, _gesture: &str, _action: &str, _dry_run: bool) -> Result<TouchChange> {
+        Err(Error::Unsupported(
+            "budctl cannot change the touch controls on these buds".to_owned(),
+        ))
     }
 }
 

@@ -9,7 +9,7 @@ use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
-use crate::status::{NoiseControl, NoiseMode, Status, Switch, TouchControls};
+use crate::status::{GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls};
 use crate::transport::Transport;
 
 mod codec;
@@ -37,6 +37,11 @@ const READ_BACK: ReadBack = ReadBack {
 const GAME_READ_BACK: ReadBack = ReadBack {
     first: Duration::from_secs(1),
     window: Duration::from_secs(3),
+};
+/// The gesture table is read back about 600 ms after the ack. Spec: realme_t310.md#gesture-write
+const TOUCH_READ_BACK: ReadBack = ReadBack {
+    first: Duration::from_millis(600),
+    window: Duration::from_secs(2),
 };
 /// Spec: realme_t310.md#write-read-back
 const READ_BACK_PAUSE: Duration = Duration::from_millis(300);
@@ -358,6 +363,94 @@ impl Session for T310Session {
             gestures,
             hold_cycle,
             warnings: reads.warnings,
+        })
+    }
+
+    /// Spec: realme_t310.md#gesture-write, #gesture-choices
+    fn set_touch(&mut self, side: &str, gesture: &str, action: &str, dry_run: bool) -> Result<TouchChange> {
+        let target = codec::touch_target(side, gesture, action)?;
+        if !self.commands.allows(codec::GESTURE_WRITE) || !self.commands.allows(codec::GESTURES) {
+            return Err(Error::Unsupported(
+                "these buds do not offer touch-control settings".to_owned(),
+            ));
+        }
+        // The write carries the whole table, so it starts from the table read just now.
+        let before = codec::decode_gesture_entries(&self.link.request(codec::GESTURES, &[])?)?;
+        let after = codec::retarget_gestures(&before, &target)?;
+        let changes: Vec<GestureChange> = before
+            .iter()
+            .zip(&after)
+            .filter(|(old, new)| old != new)
+            .map(|(old, new)| {
+                let (old, new) = (codec::name_gesture(old), codec::name_gesture(new));
+                GestureChange {
+                    side: new.side,
+                    gesture: new.gesture,
+                    from: old.action,
+                    to: new.action,
+                }
+            })
+            .collect();
+        let planned: Vec<_> = after.iter().map(codec::name_gesture).collect();
+        if changes.is_empty() {
+            return Ok(TouchChange {
+                changes,
+                write: None,
+                sent: false,
+                gestures: planned,
+            });
+        }
+        let write = RawWrite {
+            command: codec::GESTURE_WRITE,
+            payload: codec::gesture_write_payload(&after)?,
+        };
+        if dry_run {
+            return Ok(TouchChange {
+                changes,
+                write: Some(write),
+                sent: false,
+                gestures: planned,
+            });
+        }
+
+        let reply = self.link.request(write.command, &write.payload)?;
+        codec::check_write_reply(&reply, "the touch-control change")?;
+        let gestures = self.read_back(
+            TOUCH_READ_BACK,
+            codec::GESTURES,
+            &[],
+            |reply| {
+                let now = codec::decode_gesture_entries(reply)?;
+                // Applied when retargeting the table read back would change nothing.
+                let applied = codec::retarget_gestures(&now, &target).is_ok_and(|again| again == now);
+                Ok((applied, now))
+            },
+            |now| {
+                let still: Vec<String> = changes
+                    .iter()
+                    .filter_map(|change| {
+                        now.iter()
+                            .map(codec::name_gesture)
+                            .find(|g| g.group.is_none() && g.side == change.side && g.gesture == change.gesture)
+                    })
+                    .filter(|g| g.action != action)
+                    .map(|g| format!("{} {} {}", g.side, g.gesture, g.action))
+                    .collect();
+                if still.is_empty() {
+                    format!("the buds accepted {side} {gesture} {action}, but the table read back does not show it")
+                } else {
+                    format!(
+                        "the buds accepted {side} {gesture} {action}, but still report {}",
+                        still.join(", ")
+                    )
+                }
+            },
+        )?;
+        Ok(TouchChange {
+            changes,
+            write: Some(write),
+            sent: true,
+            gestures: gestures.iter().map(codec::name_gesture).collect(),
         })
     }
 }
@@ -776,5 +869,87 @@ mod tests {
         let result = open(&script).unwrap().find(true);
         script.assert_done();
         assert!(matches!(result, Err(Error::Unsupported(_))));
+    }
+
+    /// The owner's gesture table (HW1) and the same table with the left triple tap on volume up.
+    const HW1_TABLE: &str = "00 06 01 01 02 01 01 01 03 06 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08";
+    const LEFT_VOLUME_UP: &str = "06 01 01 02 01 01 01 03 0B 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04 08";
+
+    #[test]
+    fn a_touch_dry_run_reads_the_table_and_sends_nothing() {
+        let mut steps = handshake();
+        steps.extend([tx(0x0108, 0x05, ""), rx(0x8108, 0x05, HW1_TABLE)]);
+        let script = Script::new(steps);
+        let change = open(&script)
+            .unwrap()
+            .set_touch("left", "triple-tap", "volume-up", true)
+            .unwrap();
+        script.assert_done();
+        assert!(!change.sent);
+        let write = change.write.unwrap();
+        assert_eq!((write.command, write.payload), (0x0401, hex(LEFT_VOLUME_UP)));
+        assert_eq!(
+            change.changes,
+            [GestureChange {
+                side: "left".to_owned(),
+                gesture: "triple-tap".to_owned(),
+                from: "next".to_owned(),
+                to: "volume-up".to_owned(),
+            }]
+        );
+        let left_triple = change.gestures.get(1).unwrap();
+        assert_eq!(left_triple.action, "volume-up");
+    }
+
+    #[test]
+    fn sets_a_gesture_and_reads_the_table_back() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0108, 0x05, ""),
+            rx(0x8108, 0x05, HW1_TABLE),
+            tx(0x0401, 0x06, LEFT_VOLUME_UP),
+            // The owner's ack (W8): 00, then the old table cut to the write's length.
+            rx(
+                0x8401,
+                0x06,
+                "00 06 01 01 02 01 01 01 03 06 01 01 04 08 02 01 02 01 02 01 03 06 02 01 04",
+            ),
+            tx(0x0108, 0x07, ""),
+            rx(0x8108, 0x07, &format!("00 {LEFT_VOLUME_UP}")),
+        ]);
+        let script = Script::new(steps);
+        let change = open(&script)
+            .unwrap()
+            .set_touch("left", "triple-tap", "volume-up", false)
+            .unwrap();
+        script.assert_done();
+        assert!(change.sent);
+        assert_eq!(change.changes.len(), 1);
+        assert_eq!(change.gestures.get(1).unwrap().action, "volume-up");
+    }
+
+    #[test]
+    fn a_gesture_that_already_has_the_action_is_not_written() {
+        let mut steps = handshake();
+        steps.extend([tx(0x0108, 0x05, ""), rx(0x8108, 0x05, HW1_TABLE)]);
+        let script = Script::new(steps);
+        let change = open(&script)
+            .unwrap()
+            .set_touch("both", "hold", "noise-cycle", false)
+            .unwrap();
+        script.assert_done();
+        assert!(change.changes.is_empty() && change.write.is_none() && !change.sent);
+    }
+
+    #[test]
+    fn a_bad_touch_action_is_refused_before_anything_is_sent() {
+        let mut steps = handshake();
+        steps.pop();
+        let script = Script::new(steps);
+        let result = open(&script)
+            .unwrap()
+            .set_touch("left", "double-tap", "volume-up", false);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Usage(_))));
     }
 }

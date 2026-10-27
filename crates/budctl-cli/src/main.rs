@@ -39,8 +39,24 @@ enum Command {
     List,
     /// Battery, noise control, EQ and switches.
     Status,
-    /// Touch controls (gesture table) of each bud.
-    Touch,
+    /// Touch controls (gesture table) of each bud, or give one gesture a new action.
+    ///
+    /// Gestures: double-tap, triple-tap, hold. Actions: none, play-pause, next, previous,
+    /// voice-assistant, volume-up, volume-down, noise-cycle, game-mode (not every gesture takes
+    /// every action).
+    Touch {
+        /// The bud to change: left, right, or both.
+        #[arg(value_enum, requires = "gesture")]
+        side: Option<Side>,
+        /// The gesture to change.
+        #[arg(requires = "action")]
+        gesture: Option<String>,
+        /// Its new action.
+        action: Option<String>,
+        /// Read the table and show the write, but send nothing.
+        #[arg(long, requires = "side")]
+        dry_run: bool,
+    },
     /// Set noise control, then read it back.
     Anc {
         #[arg(value_enum)]
@@ -74,6 +90,24 @@ enum Command {
 enum FindAction {
     Start,
     Stop,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Side {
+    Left,
+    Right,
+    /// The left and the right bud.
+    Both,
+}
+
+impl Side {
+    fn name(self) -> &'static str {
+        match self {
+            Side::Left => "left",
+            Side::Right => "right",
+            Side::Both => "both",
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -162,7 +196,16 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let status = session.status()?;
             output::status(out, &device, model, &status, cli.json)
         }
-        Command::Touch => {
+        Command::Touch {
+            side: Some(side),
+            gesture: Some(ref gesture),
+            action: Some(ref action),
+            dry_run,
+        } => {
+            let change = session.set_touch(side.name(), gesture, action, dry_run)?;
+            output::touch_change(out, &device, model, &change, cli.json)
+        }
+        Command::Touch { .. } => {
             let touch = session.touch_controls()?;
             output::touch(out, &device, model, &touch, cli.json)
         }

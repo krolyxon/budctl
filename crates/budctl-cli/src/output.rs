@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use budctl_core::bluez::PairedDevice;
 use budctl_core::devices::Device;
-use budctl_core::status::{Charge, JSON_SCHEMA, NoiseControl, Status, Switch, TouchControls};
+use budctl_core::status::{Charge, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls};
 use budctl_core::{Error, Found};
 use serde_json::Value;
 
@@ -183,6 +183,37 @@ pub fn touch(
         writeln!(out, "  Hold cycles through: {}", cycle.join(" → "))?;
     }
     warnings(out, &touch.warnings)?;
+    Ok(())
+}
+
+/// A touch-control change: what changed (or would change, on a dry run) and the write.
+pub fn touch_change(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    change: &TouchChange,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(out, Some((device, model)), serde_json::to_value(change)?);
+    }
+    header(out, device, model)?;
+    if change.changes.is_empty() {
+        writeln!(out, "  Nothing to change: the buds already have that action.")?;
+        return Ok(());
+    }
+    for c in &change.changes {
+        writeln!(out, "  {:<6} {:<12} {} → {}", c.side, c.gesture, c.from, c.to)?;
+    }
+    if let (false, Some(write)) = (change.sent, &change.write) {
+        writeln!(out, "  Dry run, nothing sent. The write would be:")?;
+        writeln!(
+            out,
+            "  0x{:04X}  {}",
+            write.command,
+            budctl_core::debug::hex(&write.payload)
+        )?;
+    }
     Ok(())
 }
 
