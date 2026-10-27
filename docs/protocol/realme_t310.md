@@ -502,7 +502,7 @@ Evidence: *vendor*
   - **Check:** read the list again, as for [read-back](#write-read-back). The preset must have the written bands and its `selected` byte set.
   - **Expected frame** (*derived*), for `eq custom-4 50=+3 16000=-2` on the owner's list, with seq `06`: `AA 26 00 00 18 04 06 1F 00 02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 03 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E FE`.
   - **On the owner's T310** (*ours-2026-10-27*, W11b): that frame went out byte for byte. The buds answered `0x8418 00 04` within 53 ms, and the list read about 150 ms after the ack already had +3 dB at 50 Hz, -2 dB at 16000 Hz, the name unchanged and `selected` `01`. Writing the flat bands back worked the same way.
-  - **Not shown yet:** that `02` selects a preset that was not in use. `custom-4` was already the current EQ in every W11b run.
+  - **`02` selects the preset** (*ours-2026-10-27*): after `eq pure-raw`, a bare `eq custom-4` (the preset saved unchanged) made `0x010F` read `custom-4` again.
   - Create (`01`) and delete (`03`) come later, if they are wanted at all: with one preset already on the buds, editing it gives a custom EQ without them.
 
 <a id="absent"></a>
@@ -559,7 +559,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
-| 2026-10-27 | W11b `eq custom-4`, `eq custom-4 50=+3 16000=-2`, then `50=0 16000=0` | pass (protocol) | The write matched the derived frame, was acked with `00 04` and read back on the first try. The preset is flat again. Selecting a custom preset that was not in use is untested. See [§10.9](#custom-eq-save) |
+| 2026-10-27 | W11b `eq custom-4`, `eq custom-4 50=+3 16000=-2`, then `50=0 16000=0` | pass | The write matched the derived frame, was acked with `00 04` and read back on the first try. The preset is flat again. Then `eq pure-raw`, `eq custom-4` and `status`: `status` showed `custom-4`, so saving also selects. See [§10.9](#custom-eq-save) |
 | 2026-10-27 | W6b `bass -5`, `bass 5`, `bass 0` (bass boost off) | pass (protocol) | All acked with `0x841B 00`. No read-back is possible. By ear, at most a slight difference. See [§10.4](#bass-write) |
 | 2026-10-27 | W11a `eq` (custom list `0x0122`) | pass | One preset, "Custom1" (id `04`, 6 flat bands from 50 Hz), and it is the EQ in use. See [§10.9](#custom-eq) |
 | 2026-10-27 | W6a `status` with bass boost on (`0x0124`) | fail: no reply | Still no answer in 3 s. budctl does not send it. See [§9.7](#bass-read) |
