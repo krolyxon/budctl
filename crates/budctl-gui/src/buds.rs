@@ -14,6 +14,10 @@ pub struct Buds {
     pub eq: Option<EqPresets>,
     /// The touch controls, when the buds report them.
     pub touch: Option<TouchControls>,
+    /// The levels the bass level takes, when the buds have one to set.
+    pub bass_range: Option<(i8, i8)>,
+    /// The bass level last set from this window. The buds do not report it.
+    pub bass: Option<i8>,
 }
 
 impl Buds {
@@ -161,6 +165,8 @@ pub fn demo() -> Buds {
             cycle_modes: names(&["off", "transparency", "anc"]),
             warnings: Vec::new(),
         }),
+        bass_range: Some((-5, 5)),
+        bass: None,
     }
 }
 
@@ -172,6 +178,8 @@ pub fn unknown() -> Buds {
         status: Status::default(),
         eq: None,
         touch: None,
+        bass_range: None,
+        bass: None,
     }
 }
 

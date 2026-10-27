@@ -1,6 +1,7 @@
 //! The Equalizer page: the presets, and the bands of the custom ones.
 
 use budctl_core::status::{EqBand, EqPreset};
+use iced::widget::slider::Slider;
 use iced::widget::{Row, column, container, row, slider, space, text, vertical_slider};
 use iced::{Alignment, Border, Element, Length};
 
@@ -14,26 +15,39 @@ use crate::{Draft, Item, Marks, Message};
 const SAVING: &str = "Saving…";
 
 /// What the keyboard cursor can rest on, top to bottom, as [`view`] shows them: each preset,
-/// then each band of each custom preset.
+/// then each band of each custom preset, then the bass level.
 pub fn items(buds: &Buds) -> Vec<Item> {
-    let Some(eq) = &buds.eq else {
-        return Vec::new();
-    };
-    let mut items: Vec<Item> = eq.presets.iter().map(|p| Item::Preset(p.id)).collect();
-    for preset in eq.presets.iter().filter(|p| p.custom) {
-        items.extend(preset.bands.iter().map(|band| Item::Band(preset.id, band.hz)));
+    let mut items = Vec::new();
+    if let Some(eq) = &buds.eq {
+        items.extend(eq.presets.iter().map(|p| Item::Preset(p.id)));
+        for preset in eq.presets.iter().filter(|p| p.custom) {
+            items.extend(preset.bands.iter().map(|band| Item::Band(preset.id, band.hz)));
+        }
+    }
+    if buds.bass_range.is_some() {
+        items.push(Item::Bass);
     }
     items
 }
 
-/// `draft`: bands moved on the screen and not saved on the buds yet.
-pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a Draft>, marks: Marks) -> Element<'a, Message> {
+/// `draft`: bands moved on the screen and not saved on the buds yet; `bass`: a bass level
+/// likewise.
+pub fn view<'a>(
+    look: Look,
+    buds: &'a Buds,
+    draft: Option<&'a Draft>,
+    bass: Option<i8>,
+    marks: Marks,
+) -> Element<'a, Message> {
     let title = ui::title(look, "Equalizer");
+    let bass = buds
+        .bass_range
+        .map(|range| bass_level(look, range, bass.or(buds.bass), marks));
     let Some(eq) = &buds.eq else {
         let none = text("These buds did not list their presets.")
             .size(14)
             .color(look.p.dim);
-        return column![title, none].spacing(12).into();
+        return column![title, none].push(bass).spacing(12).into();
     };
     let current = eq.current.as_deref();
     let rows = eq
@@ -70,7 +84,75 @@ pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a Draft>, marks: Mar
         .fold(column![title, ui::card(look, rows)].spacing(18), |page, preset| {
             page.push(bands(look, preset, draft, marks))
         })
+        .push(bass)
         .into()
+}
+
+/// The bass level: the buds take it but do not report it, so the page shows the last level
+/// set from here, if any.
+fn bass_level<'a>(look: Look, (low, high): (i8, i8), level: Option<i8>, marks: Marks) -> Element<'a, Message> {
+    let p = look.p;
+    let focused = marks.focus == Some(Item::Bass);
+    let saving = marks
+        .pending
+        .contains(&Item::Bass)
+        .then(|| text(SAVING).size(13).color(p.icon));
+    let shown = level.map_or_else(|| "Not set".to_owned(), gain);
+    let heading = row![
+        text("Bass level").size(16).font(look.medium()).color(p.fg),
+        text(shown)
+            .size(14)
+            .font(look.medium())
+            .color(p.dim)
+            .width(Length::Fill)
+    ]
+    .push(saving)
+    .spacing(10)
+    .align_y(Alignment::Center);
+    let note = text("The buds do not report their bass level: this is the last one set from here.")
+        .size(13)
+        .color(p.dim);
+    let slider: Slider<'a, i16, Message> = slider(
+        i16::from(low)..=i16::from(high),
+        i16::from(level.unwrap_or(0)),
+        |level| Message::Bass {
+            level: i8::try_from(level).unwrap_or(0),
+            save: false,
+        },
+    )
+    .on_release(Message::SaveBass)
+    .style(move |_, _| slider::Style {
+        rail: slider::Rail {
+            backgrounds: (p.accent.into(), p.surface_highest.into()),
+            width: 6.0,
+            border: Border::default().rounded(3),
+        },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Circle { radius: 9.0 },
+            background: p.fg.into(),
+            border_width: 2.0,
+            border_color: p.accent,
+        },
+    });
+    let scale = row![
+        text(gain(low)).size(12).color(p.dim),
+        space::horizontal(),
+        text("0").size(12).color(p.dim),
+        space::horizontal(),
+        text(gain(high)).size(12).color(p.dim)
+    ];
+    let content = container(column![heading, note, slider, scale].spacing(12))
+        .padding(12)
+        .style(move |_| container::Style {
+            background: focused.then_some(p.surface_high.into()),
+            border: Border {
+                color: p.accent,
+                width: if focused { 2.0 } else { 0.0 },
+                radius: 12.0.into(),
+            },
+            ..container::Style::default()
+        });
+    ui::panel(look, content.into())
 }
 
 /// A custom preset's bands, one slider each.
@@ -168,10 +250,11 @@ mod tests {
     #[test]
     fn items_follow_the_page() {
         let items = items(&buds::demo());
-        assert_eq!(items.len(), 5 + 6);
+        assert_eq!(items.len(), 5 + 6 + 1);
         assert_eq!(items.first(), Some(&Item::Preset(0)));
         assert_eq!(items.get(5), Some(&Item::Band(4, 50)));
-        assert_eq!(items.last(), Some(&Item::Band(4, 16000)));
+        assert_eq!(items.get(10), Some(&Item::Band(4, 16000)));
+        assert_eq!(items.last(), Some(&Item::Bass));
         assert!(super::items(&buds::unknown()).is_empty());
     }
 

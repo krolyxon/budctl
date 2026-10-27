@@ -78,6 +78,12 @@ pub trait Session: Send {
         )))
     }
 
+    /// The lowest and the highest level [`Session::set_bass_level`] takes, when the buds have a
+    /// bass level to set.
+    fn bass_range(&self) -> Option<(i8, i8)> {
+        None
+    }
+
     /// Set the bass level. Only the ack can be checked when the buds cannot report the level.
     fn set_bass_level(&mut self, _level: i8) -> Result<()> {
         Err(Error::Unsupported(

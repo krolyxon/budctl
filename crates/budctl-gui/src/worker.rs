@@ -46,6 +46,8 @@ pub enum Command {
     HoldCycle(Vec<String>),
     /// Start (`true`) or stop ringing the buds.
     Find(bool),
+    /// Set the bass level.
+    Bass(i8),
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,8 @@ pub enum Event {
     HoldCycle(Vec<String>),
     /// The answer to [`Command::Find`]: whether the buds were told to ring.
     Ringing(bool),
+    /// The answer to [`Command::Bass`]: the level the buds took.
+    Bass(i8),
     /// The answer to a command that failed. The session is closed; the next command opens a
     /// new one.
     Failed { kind: Kind, message: String },
@@ -84,6 +88,8 @@ pub struct Reading {
     pub eq: Option<EqPresets>,
     /// The touch controls, when the buds report them.
     pub touch: Option<TouchControls>,
+    /// The levels the bass level takes, when the buds have one to set.
+    pub bass_range: Option<(i8, i8)>,
 }
 
 /// The worker, as a stream of events for an iced subscription. `device` picks the buds, as
@@ -207,6 +213,10 @@ impl Worker {
                 .session()
                 .and_then(|session| session.set_touch(&side, &gesture, &action, false))
                 .map(|change| Event::Touch(change.gestures)),
+            Command::Bass(level) => self
+                .session()
+                .and_then(|session| session.set_bass_level(level))
+                .map(|()| Event::Bass(level)),
             Command::Find(ring) => self
                 .session()
                 .and_then(|session| session.find(ring))
@@ -235,7 +245,13 @@ impl Worker {
         let status = session.status()?;
         let eq = session.eq_presets().ok();
         let touch = session.touch_controls().ok();
-        Ok(Reading { status, eq, touch })
+        let bass_range = session.bass_range();
+        Ok(Reading {
+            status,
+            eq,
+            touch,
+            bass_range,
+        })
     }
 
     /// The open session, opening one first if there is none.

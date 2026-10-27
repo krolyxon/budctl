@@ -379,6 +379,13 @@ impl Session for T310Session {
     }
 
     /// Ack-only: the T310 never answers the bass-level read. Spec: realme_t310.md#bass-write
+    /// Spec: realme_t310.md#bass-write
+    fn bass_range(&self) -> Option<(i8, i8)> {
+        self.commands
+            .allows(codec::BASS_LEVEL_WRITE)
+            .then_some(codec::BASS_RANGE)
+    }
+
     fn set_bass_level(&mut self, level: i8) -> Result<()> {
         let payload = codec::bass_write_payload(level)?;
         if !self.commands.allows(codec::BASS_LEVEL_WRITE) {
@@ -1180,7 +1187,9 @@ mod tests {
         let mut steps = handshake();
         steps.extend([tx(0x041B, 0x05, "FB 05 FE"), rx(0x841B, 0x05, "00")]);
         let script = Script::new(steps);
-        open(&script).unwrap().set_bass_level(-2).unwrap();
+        let mut session = open(&script).unwrap();
+        assert_eq!(session.bass_range(), Some((-5, 5)));
+        session.set_bass_level(-2).unwrap();
         script.assert_done();
     }
 

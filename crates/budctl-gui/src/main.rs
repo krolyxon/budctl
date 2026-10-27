@@ -190,6 +190,8 @@ enum Item {
     Cycle(u8),
     /// Find my earbuds.
     Find,
+    /// The bass level.
+    Bass,
 }
 
 /// What a page needs besides the buds: the item under the keyboard cursor, if it shows, and the
@@ -259,6 +261,13 @@ enum Message {
     Find,
     /// The answer to "Ring the buds?".
     ConfirmFind(bool),
+    /// Move the bass level. With `save`, set it on the buds right away, else when
+    /// [`Message::SaveBass`] comes (the mouse lets go of the slider).
+    Bass {
+        level: i8,
+        save: bool,
+    },
+    SaveBass,
     ShowHelp,
     /// Read the buds again.
     Refresh,
@@ -300,6 +309,8 @@ struct App {
     draft: Option<Draft>,
     /// A gesture's action picked and not written yet.
     touch_draft: Option<TouchDraft>,
+    /// A bass level moved and not set yet.
+    bass_draft: Option<i8>,
     /// The buds were told to ring and not yet to stop.
     ringing: bool,
     /// "Ring the buds?" is open.
@@ -339,6 +350,7 @@ impl App {
             read_at: None,
             draft: None,
             touch_draft: None,
+            bass_draft: None,
             ringing: false,
             confirm_find: false,
             palette_problem: None,
@@ -376,6 +388,14 @@ impl App {
                 }
             }
             Message::ShowHelp => self.help = true,
+            Message::Bass { level, save } => {
+                let (low, high) = self.buds.bass_range.unwrap_or((i8::MIN, i8::MAX));
+                self.bass_draft = Some(level.clamp(low, high));
+                if save {
+                    self.save_bass();
+                }
+            }
+            Message::SaveBass => self.save_bass(),
             Message::Refresh => self.refresh(),
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
@@ -427,6 +447,10 @@ impl App {
                     }
                 }
                 Command::Find(ring) => self.ringing = ring,
+                Command::Bass(level) => {
+                    self.buds.bass = Some(level);
+                    self.bass_draft = None;
+                }
                 Command::CustomEq(_, bands) => {
                     if let Some(preset) = self.buds.preset(item_preset(item)) {
                         let mut preset = preset.clone();
@@ -535,6 +559,13 @@ impl App {
                     self.save_touch(row);
                 }
             }
+            Event::Bass(level) => {
+                self.in_flight.pop_front();
+                self.buds.bass = Some(level);
+                self.link = Link::Live;
+                // A level moved while this one was on its way goes out now.
+                self.save_bass();
+            }
             Event::Ringing(ring) => {
                 self.in_flight.pop_front();
                 self.ringing = ring;
@@ -556,6 +587,7 @@ impl App {
                     Some(Some(Item::Gesture(row))) if self.touch_draft.as_ref().is_some_and(|d| d.row == row) => {
                         self.touch_draft = None;
                     }
+                    Some(Some(Item::Bass)) => self.bass_draft = None,
                     _ => {}
                 }
                 if kind == Kind::NotFound {
@@ -569,6 +601,7 @@ impl App {
     fn apply_reading(&mut self, reading: Reading) {
         self.buds.eq = reading.eq;
         self.buds.touch = reading.touch;
+        self.buds.bass_range = reading.bass_range;
         if let Some(level) = reading
             .status
             .noise_control
@@ -698,6 +731,19 @@ impl App {
         let busy = self.pending().iter().any(|item| matches!(item, Item::Cycle(_)));
         if modes.len() >= 2 && !busy {
             self.write(Item::Cycle(mode), Command::HoldCycle(modes));
+        }
+    }
+
+    /// Sets the bass level moved on the screen. If a level is on its way, this one goes out
+    /// when that is answered: the latest level wins.
+    fn save_bass(&mut self) {
+        let Some(level) = self.bass_draft else {
+            return;
+        };
+        if self.buds.bass == Some(level) {
+            self.bass_draft = None;
+        } else if !self.pending().contains(&Item::Bass) {
+            self.write(Item::Bass, Command::Bass(level));
         }
     }
 
@@ -870,6 +916,18 @@ impl App {
                 })
             }
             Item::Find => (action != Action::Left).then_some(Message::Find),
+            Item::Bass => {
+                let (low, high) = self.buds.bass_range?;
+                let now = self.bass_draft.or(self.buds.bass);
+                let to = match (action, now) {
+                    // Not set yet: the first step starts from the middle.
+                    (Action::Left | Action::Right, None) => 0,
+                    (Action::Left, Some(level)) => level.checked_sub(1)?.max(low),
+                    (Action::Right, Some(level)) => level.checked_add(1)?.min(high),
+                    _ => return None,
+                };
+                (Some(to) != now).then_some(Message::Bass { level: to, save: true })
+            }
             Item::Cycle(mode) => {
                 let touch = self.buds.touch.as_ref()?;
                 let on = touch
@@ -951,7 +1009,7 @@ impl App {
                     focus: self.focus(),
                     pending: &pending,
                 };
-                equalizer::view(look, &self.buds, self.draft.as_ref(), marks)
+                equalizer::view(look, &self.buds, self.draft.as_ref(), self.bass_draft, marks)
             }
             Page::Gestures if self.has_reading() => {
                 let marks = Marks {
@@ -1230,6 +1288,7 @@ mod tests {
             status: buds::demo().status,
             eq: buds::demo().eq,
             touch: buds::demo().touch,
+            bass_range: buds::demo().bass_range,
         }
     }
 
@@ -1514,7 +1573,7 @@ mod tests {
         press(&mut app, "j l");
         assert_eq!(app.buds.status.eq.as_deref(), Some("pure-raw"));
         assert_eq!(app.buds.eq_name(), "Pure raw");
-        press(&mut app, "G");
+        press(&mut app, "G k");
         assert_eq!(app.focus(), Some(Item::Band(4, 16000)));
         // Moving a band saves the custom preset, which also selects it.
         press(&mut app, "l");
@@ -1530,7 +1589,7 @@ mod tests {
         let (mut app, commands) = live();
         let _ = commands.try_recv();
         let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
-        press(&mut app, "J G G l");
+        press(&mut app, "J G G k l");
         let gain = |bands: &[EqBand]| bands.last().map(|band| band.gain);
         assert!(matches!(
             commands.try_recv(),
@@ -1649,6 +1708,42 @@ mod tests {
     }
 
     #[test]
+    fn the_bass_level_by_key() {
+        let mut app = app();
+        press(&mut app, "J G G");
+        assert_eq!(app.focus(), Some(Item::Bass));
+        assert_eq!(app.buds.bass, None, "the buds do not say");
+        press(&mut app, "l");
+        assert_eq!(app.buds.bass, Some(0), "the first step starts from the middle");
+        press(&mut app, "l l");
+        assert_eq!(app.buds.bass, Some(2));
+        press(&mut app, "h h h h h h h h");
+        assert_eq!(app.buds.bass, Some(-5), "it stops at the bottom");
+    }
+
+    #[test]
+    fn bass_moves_wait_for_the_level_before_them() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::Bass { level: 2, save: false });
+        assert!(
+            commands.try_recv().is_err(),
+            "a drag sends nothing until the mouse lets go"
+        );
+        let _ = app.update(Message::SaveBass);
+        assert!(matches!(commands.try_recv(), Ok(Command::Bass(2))));
+        let _ = app.update(Message::Bass { level: 4, save: true });
+        assert!(commands.try_recv().is_err());
+        let _ = app.update(Message::Worker(Event::Bass(2)));
+        assert!(matches!(commands.try_recv(), Ok(Command::Bass(4))));
+        let _ = app.update(Message::Worker(Event::Bass(4)));
+        assert_eq!(app.buds.bass, Some(4));
+        assert_eq!(app.bass_draft, None);
+        assert!(commands.try_recv().is_err());
+    }
+
+    #[test]
     fn steps() {
         let abc = ['a', 'b', 'c'];
         assert_eq!(step(&abc, Some(0), Action::Left), None);
@@ -1699,9 +1794,10 @@ mod tests {
         shots.push(("overview-full".to_owned(), 1240.0, on(Page::Overview, "")));
         shots.push(("overview-cursor".to_owned(), 800.0, on(Page::Overview, "j j j j")));
         shots.push(("keys".to_owned(), 800.0, on(Page::Overview, "?")));
-        shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k")));
+        shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k k")));
         shots.push(("gestures-cursor".to_owned(), 1000.0, on(Page::Gestures, "j j")));
         shots.push(("find-confirm".to_owned(), 800.0, on(Page::Earbuds, "j Enter")));
+        shots.push(("equalizer-bass".to_owned(), 1300.0, on(Page::Equalizer, "G G l l")));
         let mut connecting = App::new(palette.clone(), font, None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));
