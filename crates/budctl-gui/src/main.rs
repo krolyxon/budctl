@@ -1,10 +1,10 @@
 //! `budctl-gui`: control wireless earbuds from Linux, in a window.
 //!
 //! A thin layer over budctl-core, like the CLI. For now it shows demo data: the look comes first,
-//! the live connection later (CLAUDE.md, GUI).
+//! the live connection later (CLAUDE.md, GUI). It is styled after the owner's shell, Aurora.
 
 mod demo;
-mod icons;
+mod glyphs;
 mod overview;
 mod theme;
 mod ui;
@@ -13,16 +13,16 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use budctl_core::status::{AncLevel, NoiseControl, NoiseMode};
-use iced::widget::{Column, column, container, row, scrollable, space, text};
-use iced::{Alignment, Border, Element, Font, Length, Size, Subscription, Theme, event, window};
+use iced::widget::{Column, column, container, row};
+use iced::{Element, Font, Length, Size, Subscription, Theme, event, window};
 
-use icons::Icon;
 use theme::Look;
 
 const USAGE: &str = "usage: budctl-gui [--theme <palette.json>]
 
-Colors come from --theme, else from ~/.config/budctl/theme.json if it exists, else built in.
-The palette file takes the keys of a matugen palette like Aurora's (bg, fg, primary, …).";
+Colors come from --theme, else ~/.config/budctl/theme.json, else Aurora's matugen palette
+(~/.cache/matugen/aurora.json), else they are built in. A palette file takes Aurora's keys
+(bg, fg, primary, surface, surfaceHigh, outlineVariant, surfaceVariantFg, err).";
 
 fn main() -> ExitCode {
     let theme_file = match parse_args(std::env::args().skip(1)) {
@@ -36,15 +36,15 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let font = theme::system_font();
+    let font = theme::font();
     let result = iced::application(move || App::new(theme_file.clone(), font), App::update, App::view)
         .title("budctl")
         .theme(App::theme)
         .subscription(App::subscription)
         .default_font(font)
         .window(window::Settings {
-            size: Size::new(1040.0, 800.0),
-            min_size: Some(Size::new(760.0, 540.0)),
+            size: Size::new(960.0, 680.0),
+            min_size: Some(Size::new(720.0, 480.0)),
             platform_specific: window::settings::PlatformSpecific {
                 application_id: "budctl".to_owned(),
                 ..window::settings::PlatformSpecific::default()
@@ -96,23 +96,31 @@ impl Page {
         Page::Settings,
     ];
 
-    fn title(self) -> &'static str {
+    fn name(self) -> &'static str {
         match self {
-            Page::Overview => "Overview",
-            Page::Equalizer => "Equalizer",
-            Page::Gestures => "Gestures",
-            Page::Earbuds => "Earbud settings",
-            Page::Settings => "App settings",
+            Page::Overview => "overview",
+            Page::Equalizer => "equalizer",
+            Page::Gestures => "gestures",
+            Page::Earbuds => "earbuds",
+            Page::Settings => "settings",
         }
     }
 
-    fn icon(self) -> Icon {
+    fn glyph(self) -> char {
         match self {
-            Page::Overview => Icon::Overview,
-            Page::Equalizer => Icon::Equalizer,
-            Page::Gestures => Icon::Gestures,
-            Page::Earbuds => Icon::Earbud,
-            Page::Settings => Icon::Settings,
+            Page::Overview => glyphs::OVERVIEW,
+            Page::Equalizer => glyphs::TUNE,
+            Page::Gestures => glyphs::GESTURE,
+            Page::Earbuds => glyphs::EARBUDS,
+            Page::Settings => glyphs::COG,
+        }
+    }
+
+    /// The sidebar group it is listed under.
+    fn group(self) -> &'static str {
+        match self {
+            Page::Settings => "app",
+            _ => "buds",
         }
     }
 }
@@ -131,7 +139,7 @@ enum Message {
 struct App {
     page: Page,
     buds: demo::Buds,
-    /// The level "Noise cancelling" turns on at: the one last reported or picked.
+    /// The level "noise cancelling" turns on at: the one last reported or picked.
     anc_level: AncLevel,
     look: Look,
     theme: Theme,
@@ -152,10 +160,7 @@ impl App {
             page: Page::Overview,
             buds,
             anc_level,
-            look: Look {
-                p: theme::BUILT_IN,
-                font,
-            },
+            look: Look::new(theme::BUILT_IN, font),
             theme: theme::iced_theme(&theme::BUILT_IN),
             palette: theme::Source::new(theme_file),
         };
@@ -217,86 +222,53 @@ impl App {
         let look = self.look;
         let page = match self.page {
             Page::Overview => overview::view(look, &self.buds, self.anc_level),
-            page => column![
-                ui::title(look, page.title()),
-                text("This page comes in a later step.").size(14).color(look.p.dim)
-            ]
-            .spacing(12)
-            .into(),
+            _ => ui::hint(look, "this page comes in a later step").into(),
         };
-        let p = look.p;
-        let content = scrollable(
-            container(container(page).max_width(860))
-                .center_x(Length::Fill)
-                .padding([30, 36]),
-        )
-        .height(Length::Fill)
-        .style(move |theme, status| {
-            let mut style = scrollable::default(theme, status);
-            for rail in [&mut style.vertical_rail, &mut style.horizontal_rail] {
-                rail.background = None;
-                rail.border = Border::default();
-                rail.scroller.background = p.surface_highest.into();
-                rail.scroller.border = Border::default().rounded(4);
-            }
-            style
-        });
+        let content = column![ui::title(look, self.page.name()), ui::scroll(look, page)]
+            .spacing(12)
+            .padding(16)
+            .width(Length::Fill);
         row![self.sidebar(), ui::divider(look), content].into()
     }
 
+    /// Aurora's settings sidebar: the title, the buds, then the pages by group.
     fn sidebar(&self) -> Element<'_, Message> {
         let look = self.look;
         let p = look.p;
         let connected = self.buds.connected;
-        let (light, state) = if connected {
-            (p.ok, "Connected")
+        let status = format!("{}  ·  demo", if connected { "connected" } else { "not connected" });
+        let connect = if connected {
+            ui::button_(look, Some(glyphs::BT_OFF), "disconnect", false, Message::Connect(false))
         } else {
-            (p.dim, "Not connected")
+            ui::button_(look, Some(glyphs::BT_CONNECT), "connect", false, Message::Connect(true))
         };
-        let device = container(
-            column![
-                text(self.buds.name.as_str()).size(16).font(look.bold()).color(p.fg),
-                row![
-                    ui::light(light),
-                    text(state).size(13).color(p.dim),
-                    space::horizontal(),
-                    ui::tag(look, "demo")
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-                ui::outline_button(
-                    look,
-                    if connected { "Disconnect" } else { "Connect" },
-                    Message::Connect(!connected)
-                ),
-            ]
-            .spacing(12),
-        )
-        .padding(16)
-        .style(move |_| container::Style {
-            background: Some(p.surface.into()),
-            border: Border {
-                color: p.line,
-                width: 1.0,
-                radius: 18.0.into(),
-            },
-            ..container::Style::default()
-        });
-        let pages = Page::ALL.into_iter().fold(Column::new().spacing(3), |pages, page| {
-            pages.push(ui::nav_item(
+        let mut pages = Column::new().spacing(2);
+        let mut group = "";
+        for page in Page::ALL {
+            if page.group() != group {
+                group = page.group();
+                pages = pages.push(container(ui::group(look, group)).padding([6, 0]));
+            }
+            pages = pages.push(ui::nav_item(
                 look,
-                page.icon(),
-                page.title(),
+                page.glyph(),
+                page.name(),
                 page == self.page,
                 Message::Open(page),
-            ))
-        });
-        container(column![device, pages].spacing(22))
-            .padding([18, 14])
-            .width(268)
+            ));
+        }
+        let top = column![
+            ui::sidebar_title(look, glyphs::EARBUDS, "budctl"),
+            ui::device(look, &self.buds.name, status, connected),
+            connect.width(Length::Fill),
+        ]
+        .spacing(8);
+        container(column![top, pages].spacing(10))
+            .padding(10)
+            .width(200)
             .height(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(p.surface_low.into()),
+                background: Some(p.surface.into()),
                 ..container::Style::default()
             })
             .into()
@@ -353,12 +325,12 @@ mod tests {
     fn pages_render() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/gui-snapshots");
         let _ = fs::remove_dir_all(&dir);
-        let font = theme::system_font();
+        let font = theme::font();
         let palette = std::env::var_os("BUDCTL_THEME").map(PathBuf::from);
         let shots = Page::ALL
             .into_iter()
-            .map(|page| (page, 800.0, format!("{page:?}").to_lowercase()))
-            .chain([(Page::Overview, 1240.0, "overview-full".to_owned())]);
+            .map(|page| (page, 680.0, page.name().to_owned()))
+            .chain([(Page::Overview, 860.0, "overview-full".to_owned())]);
         for (page, height, name) in shots {
             let mut app = App::new(palette.clone(), font);
             app.page = page;
@@ -366,7 +338,7 @@ mod tests {
                 default_font: font,
                 ..iced::Settings::default()
             };
-            let mut ui = iced_test::Simulator::with_size(settings, Size::new(1040.0, height), app.view());
+            let mut ui = iced_test::Simulator::with_size(settings, Size::new(960.0, height), app.view());
             let snapshot = ui.snapshot(&app.theme).unwrap();
             assert!(snapshot.matches_image(dir.join(name)).unwrap());
         }

@@ -1,171 +1,139 @@
-//! The Overview page: battery, noise control, the switches, and the way to the other pages.
+//! The Overview page: battery, noise control, sound, and the buds' other settings.
 
 use budctl_core::status::{AncLevel, Charge, NoiseMode, Switch};
-use iced::widget::{column, container, row, text};
-use iced::{Alignment, Element, Length};
+use iced::Element;
 
 use crate::demo::Buds;
-use crate::icons::{self, Icon, Part, RingColors};
+use crate::glyphs;
 use crate::theme::Look;
-use crate::ui::{self, Segment};
+use crate::ui::{self, Opt};
 use crate::{Message, Page};
 
-pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel) -> Element<'a, Message> {
-    column![ui::title(look, "Overview"), battery(look, buds)]
-        .push(
-            buds.status
-                .noise_control
-                .as_ref()
-                .map(|now| noise_control(look, &now.mode, anc_level)),
-        )
-        .push(switches(look, &buds.status.switches))
-        .push(more(look, buds))
-        .spacing(18)
-        .into()
+/// The switches the "sound" section shows, in this order. The others go under "buds".
+const SOUND: [&str; 3] = ["game", "spatial", "bass-boost"];
+
+/// The line under a switch's name, for the switches the GUI knows.
+fn about(key: &str) -> Option<&'static str> {
+    match key {
+        "game" => Some("lower latency, for games and video"),
+        "spatial" => Some("wider, surround-like sound"),
+        "bass-boost" => Some("stronger low end"),
+        "wind" => Some("less wind noise outdoors"),
+        "dual" => Some("stay connected to two devices at once"),
+        _ => None,
+    }
 }
 
-fn battery<'a>(look: Look, buds: &Buds) -> Element<'a, Message> {
-    let p = look.p;
-    let colors = RingColors {
-        track: p.surface_highest,
-        charge: p.accent,
-        part: p.fg,
-        tip: p.dim,
-        cutout: p.surface,
+pub fn view<'a>(look: Look, buds: &'a Buds, anc_level: AncLevel) -> Element<'a, Message> {
+    let status = &buds.status;
+    let switch = |s: &Switch| {
+        ui::switch_row(
+            look,
+            s.label.to_lowercase(),
+            about(s.key),
+            s.on,
+            Message::Switch(s.key, !s.on),
+        )
     };
-    let gauge = |part, label: &'a str, charge: Option<Charge>| -> Element<'a, Message> {
-        let reading = match charge {
-            Some(charge) => format!("{}%", charge.level),
-            None => "—".to_owned(),
-        };
-        let figure = row![text(reading).size(21).font(look.bold()).color(p.fg)]
-            .push(
-                charge
-                    .filter(|c| c.charging)
-                    .map(|_| icons::icon(Icon::Bolt, 16.0, p.icon)),
-            )
-            .spacing(4)
-            .align_y(Alignment::Center);
-        column![
-            icons::battery_ring(part, charge.map(|c| c.level), 112.0, colors),
-            figure,
-            text(label).size(13).color(p.dim)
-        ]
-        .spacing(6)
-        .align_x(Alignment::Center)
-        .width(Length::Fill)
-        .into()
+
+    let mut sound = vec![ui::section(look, "sound")];
+    sound.extend(
+        SOUND
+            .iter()
+            .filter_map(|key| status.switches.iter().find(|s| s.key == *key))
+            .map(switch),
+    );
+    sound.push(ui::link_row(
+        look,
+        "equalizer",
+        Some("presets, and your own"),
+        Some(buds.eq_name.clone()),
+        Message::Open(Page::Equalizer),
+    ));
+
+    let mut rest = vec![ui::section(look, "buds")];
+    rest.extend(status.switches.iter().filter(|s| !SOUND.contains(&s.key)).map(switch));
+    rest.push(ui::link_row(
+        look,
+        "gestures",
+        Some("taps and holds on each bud"),
+        None,
+        Message::Open(Page::Gestures),
+    ));
+    rest.push(ui::link_row(
+        look,
+        "earbuds",
+        Some("find my earbuds, firmware"),
+        None,
+        Message::Open(Page::Earbuds),
+    ));
+
+    let mut sections = vec![battery(look, buds)];
+    sections.extend(
+        status
+            .noise_control
+            .as_ref()
+            .map(|now| noise_control(look, &now.mode, anc_level)),
+    );
+    sections.extend([sound, rest]);
+    ui::sections(sections)
+}
+
+fn battery<'a>(look: Look, buds: &Buds) -> Vec<Element<'a, Message>> {
+    let p = look.p;
+    let bar = |name: &'a str, charge: Option<Charge>| match charge {
+        Some(charge) => {
+            let low = charge.level <= 15 && !charge.charging;
+            let value = if charge.charging {
+                format!("{}%  charging", charge.level)
+            } else {
+                format!("{}%", charge.level)
+            };
+            let fraction = f32::from(charge.level.min(100)) / 100.0;
+            ui::stat_bar(look, name, fraction, value, if low { p.err } else { p.accent })
+        }
+        None => ui::stat_bar(look, name, 0.0, "unknown".to_owned(), p.accent),
     };
     let battery = buds.status.battery;
-    let gauges = row![
-        gauge(Part::Left, "Left", battery.left),
-        gauge(Part::Case, "Case", battery.case),
-        gauge(Part::Right, "Right", battery.right),
-    ];
-    ui::card(look, vec![container(gauges).padding([22, 8]).into()])
+    vec![
+        ui::section(look, "battery"),
+        bar("left", battery.left),
+        bar("right", battery.right),
+        bar("case", battery.case),
+    ]
 }
 
-fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel) -> Element<'a, Message> {
+fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel) -> Vec<Element<'a, Message>> {
     let modes = [
-        (Icon::NoiseOff, "Off", NoiseMode::Off),
-        (Icon::Anc, "Noise cancelling", NoiseMode::Anc(anc_level)),
-        (Icon::Transparency, "Transparency", NoiseMode::Transparency),
+        (glyphs::NOISE_OFF, "off", NoiseMode::Off),
+        (glyphs::ANC, "noise cancelling", NoiseMode::Anc(anc_level)),
+        (glyphs::TRANSPARENCY, "transparency", NoiseMode::Transparency),
     ];
-    let segments = modes
+    let options = modes
         .into_iter()
-        .map(|(icon, label, set)| Segment {
-            icon: Some(icon),
-            label,
-            selected: set.name() == mode,
+        .map(|(glyph, words, set)| Opt {
+            glyph: Some(glyph),
+            words,
+            chosen: set.name() == mode,
             on_press: Message::Noise(set),
         })
         .collect();
-    let levels: Vec<Segment> = [
-        (AncLevel::Light, "Light"),
-        (AncLevel::Medium, "Medium"),
-        (AncLevel::Deep, "Deep"),
-    ]
-    .into_iter()
-    .map(|(level, label)| Segment {
-        icon: None,
-        label,
-        selected: level == anc_level,
-        on_press: Message::Noise(NoiseMode::Anc(level)),
-    })
-    .collect();
-    let strength = row![
-        text("Strength").size(13.5).color(look.p.dim).width(Length::Fill),
-        container(ui::segmented(look, levels, false)).width(300)
-    ]
-    .align_y(Alignment::Center)
-    .padding([0, 8]);
-    column![ui::segmented(look, segments, true)]
-        .push((mode == NoiseMode::Anc(anc_level).name()).then_some(strength))
-        .spacing(12)
-        .into()
-}
-
-/// How the page shows the switches it knows, in this order. Others still show, last, with a
-/// plain icon and no subtitle.
-const SWITCHES: [(&str, Icon, &str); 5] = [
-    ("game", Icon::Game, "Lower latency, for games and video"),
-    ("spatial", Icon::Spatial, "Wider, surround-like sound"),
-    ("bass-boost", Icon::Bass, "Stronger low end"),
-    ("wind", Icon::Wind, "Less wind noise outdoors"),
-    ("dual", Icon::Dual, "Stay connected to two devices at once"),
-];
-
-fn switches<'a>(look: Look, switches: &[Switch]) -> Element<'a, Message> {
-    let known = |key: &str| SWITCHES.iter().find(|(k, _, _)| *k == key);
-    let rank = |s: &&Switch| {
-        SWITCHES
-            .iter()
-            .position(|(k, _, _)| *k == s.key)
-            .unwrap_or(SWITCHES.len())
-    };
-    let mut shown: Vec<&Switch> = switches.iter().collect();
-    shown.sort_by_key(rank);
-    let rows = shown
+    let mut rows = vec![ui::section(look, "noise control"), ui::choice(look, "mode", options)];
+    if mode == NoiseMode::Anc(anc_level).name() {
+        let levels = [
+            (AncLevel::Light, "light"),
+            (AncLevel::Medium, "medium"),
+            (AncLevel::Deep, "deep"),
+        ]
         .into_iter()
-        .map(|s| {
-            let (icon, subtitle) = known(s.key).map_or((Icon::Settings, None), |&(_, icon, subtitle)| {
-                (icon, Some(subtitle.to_owned()))
-            });
-            ui::setting(
-                look,
-                icon,
-                s.label,
-                subtitle,
-                ui::switch(look, s.on),
-                Message::Switch(s.key, !s.on),
-            )
+        .map(|(level, words)| Opt {
+            glyph: None,
+            words,
+            chosen: level == anc_level,
+            on_press: Message::Noise(NoiseMode::Anc(level)),
         })
         .collect();
-    ui::card(look, rows)
-}
-
-fn more<'a>(look: Look, buds: &Buds) -> Element<'a, Message> {
-    let open = |icon, title, subtitle: &str, page| {
-        ui::setting(
-            look,
-            icon,
-            title,
-            Some(subtitle.to_owned()),
-            ui::chevron(look),
-            Message::Open(page),
-        )
-    };
-    ui::card(
-        look,
-        vec![
-            open(Icon::Equalizer, "Equalizer", &buds.eq_name, Page::Equalizer),
-            open(Icon::Gestures, "Gestures", "Taps and holds on each bud", Page::Gestures),
-            open(
-                Icon::Earbud,
-                "Earbud settings",
-                "Find my earbuds, firmware",
-                Page::Earbuds,
-            ),
-        ],
-    )
+        rows.push(ui::choice(look, "strength", levels));
+    }
+    rows
 }

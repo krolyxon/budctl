@@ -1,67 +1,49 @@
-//! Colors and fonts. The colors are a built-in dark palette, or one read from a matugen JSON file.
+//! Colors and fonts, matched to the owner's shell (Aurora): its matugen palette, JetBrains Mono, and
+//! its 12 px base size.
 //!
-//! The file uses the keys of the owner's Aurora palette (`bg`, `fg`, `primary`…), so
-//! `~/.cache/matugen/aurora.json` works as it is, and the keys map to the same roles as in Aurora's
-//! `Theme.qml`, plus `secondary` for icons. A key the file lacks keeps its built-in color.
+//! The palette file uses Aurora's keys (`bg`, `fg`, `primary`…), so `~/.cache/matugen/aurora.json`
+//! works as it is, and the keys map to the same roles as in Aurora's `Theme.qml`. A key the file
+//! lacks keeps its built-in color.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::SystemTime;
 
-use iced::font::Weight;
+use iced::font::{Family, Weight};
 use iced::{Color, Font};
 use serde::Deserialize;
 
-/// The colors the UI uses, by role.
+/// The colors the UI uses, by role, named as in Aurora.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
-    /// Window background.
+    /// Window background, and text on `accent`.
     pub bg: Color,
     /// Text.
     pub fg: Color,
-    /// Secondary text, and icons at rest.
+    /// Secondary text: hints, and the labels of bars and groups.
     pub dim: Color,
-    /// What is on or selected: switches, the noise-control pill, battery rings.
+    /// What is on or chosen: filled buttons and switches, section labels, bars.
     pub accent: Color,
-    /// Icons and small marks on cards and the sidebar. matugen's `primary` (Aurora's key) is a
-    /// container color, too dark to draw thin lines with on a dark card.
-    pub icon: Color,
-    /// Text and icons on `accent`.
-    pub accent_fg: Color,
-    /// A quiet accent: the open page in the sidebar.
-    pub accent_dim: Color,
-    /// The sidebar.
-    pub surface_low: Color,
-    /// Cards.
+    /// The sidebar, and hovered setting rows.
     pub surface: Color,
-    /// Hovered rows, and switches when off.
+    /// Hovered buttons and rows, switches when off, bar tracks.
     pub surface_high: Color,
-    /// Battery ring tracks.
-    pub surface_highest: Color,
-    /// Card borders and separators.
+    /// Borders and separators.
     pub line: Color,
     pub err: Color,
-    /// "Connected". matugen has no such role, so it stays green.
-    pub ok: Color,
 }
 
-/// Dark, with a red accent.
+/// Near-black, with a red accent.
 pub const BUILT_IN: Palette = Palette {
-    bg: Color::from_rgb8(0x12, 0x12, 0x14),
-    fg: Color::from_rgb8(0xEE, 0xEE, 0xF1),
-    dim: Color::from_rgb8(0x9C, 0x9C, 0xA6),
-    accent: Color::from_rgb8(0xE0, 0x30, 0x2E),
-    icon: Color::from_rgb8(0xE0, 0x30, 0x2E),
-    accent_fg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
-    accent_dim: Color::from_rgb8(0x3A, 0x1A, 0x1C),
-    surface_low: Color::from_rgb8(0x17, 0x17, 0x1A),
-    surface: Color::from_rgb8(0x1E, 0x1E, 0x22),
-    surface_high: Color::from_rgb8(0x29, 0x29, 0x2E),
-    surface_highest: Color::from_rgb8(0x33, 0x33, 0x39),
-    line: Color::from_rgb8(0x2D, 0x2D, 0x33),
+    bg: Color::from_rgb8(0x0D, 0x0D, 0x0F),
+    fg: Color::from_rgb8(0xE4, 0xE4, 0xE8),
+    dim: Color::from_rgb8(0xA5, 0xA5, 0xAE),
+    accent: Color::from_rgb8(0xD9, 0x3A, 0x3A),
+    surface: Color::from_rgb8(0x19, 0x19, 0x1C),
+    surface_high: Color::from_rgb8(0x24, 0x24, 0x28),
+    line: Color::from_rgb8(0x3B, 0x3B, 0x42),
     err: Color::from_rgb8(0xFF, 0xB4, 0xAB),
-    ok: Color::from_rgb8(0x4C, 0xC3, 0x6A),
 };
 
 /// The palette file's keys. Other keys (`image`, `secondary`…) are ignored.
@@ -71,13 +53,8 @@ struct PaletteFile {
     bg: Option<String>,
     fg: Option<String>,
     primary: Option<String>,
-    primary_fg: Option<String>,
-    primary_container: Option<String>,
-    secondary: Option<String>,
-    surface_low: Option<String>,
     surface: Option<String>,
     surface_high: Option<String>,
-    surface_highest: Option<String>,
     outline_variant: Option<String>,
     surface_variant_fg: Option<String>,
     err: Option<String>,
@@ -96,16 +73,10 @@ pub fn parse(json: &str) -> Result<Palette, String> {
         fg: pick("fg", file.fg, b.fg)?,
         dim: pick("surfaceVariantFg", file.surface_variant_fg, b.dim)?,
         accent: pick("primary", file.primary, b.accent)?,
-        icon: pick("secondary", file.secondary, b.icon)?,
-        accent_fg: pick("primaryFg", file.primary_fg, b.accent_fg)?,
-        accent_dim: pick("primaryContainer", file.primary_container, b.accent_dim)?,
-        surface_low: pick("surfaceLow", file.surface_low, b.surface_low)?,
         surface: pick("surface", file.surface, b.surface)?,
         surface_high: pick("surfaceHigh", file.surface_high, b.surface_high)?,
-        surface_highest: pick("surfaceHighest", file.surface_highest, b.surface_highest)?,
         line: pick("outlineVariant", file.outline_variant, b.line)?,
         err: pick("err", file.err, b.err)?,
-        ok: b.ok,
     })
 }
 
@@ -125,13 +96,23 @@ fn parse_hex(hex: &str) -> Option<Color> {
     }
 }
 
-/// The palette file to follow: `--theme <file>`, else `~/.config/budctl/theme.json`.
+/// The palette file to follow when `--theme` names none: `~/.config/budctl/theme.json`, else
+/// Aurora's own palette. When neither exists yet, the first, so creating it later takes effect.
 pub fn default_file() -> Option<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")))?;
-    Some(config.join("budctl/theme.json"))
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let xdg = |var: &str, fallback: &str| {
+        std::env::var_os(var)
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| home.join(fallback))
+    };
+    let ours = xdg("XDG_CONFIG_HOME", ".config").join("budctl/theme.json");
+    let aurora = xdg("XDG_CACHE_HOME", ".cache").join("matugen/aurora.json");
+    Some(if !ours.exists() && aurora.exists() {
+        aurora
+    } else {
+        ours
+    })
 }
 
 /// The palette file and the version of it last read, so it is only read again when it changes.
@@ -166,19 +147,23 @@ impl Source {
     }
 }
 
-/// The palette and the fonts, handed to everything that draws.
+/// The palette and the font, handed to everything that draws.
 #[derive(Debug, Clone, Copy)]
 pub struct Look {
     pub p: Palette,
     pub font: Font,
+    /// The base text size (Aurora's `fontSize`). Other sizes are relative to it.
+    pub size: f32,
 }
 
 impl Look {
-    pub fn medium(self) -> Font {
-        Font {
-            weight: Weight::Medium,
-            ..self.font
-        }
+    pub fn new(p: Palette, font: Font) -> Self {
+        Look { p, font, size: 12.0 }
+    }
+
+    /// The base size plus `delta` pixels.
+    pub fn px(self, delta: f32) -> f32 {
+        self.size + delta
     }
 
     pub fn bold(self) -> Font {
@@ -189,24 +174,33 @@ impl Look {
     }
 }
 
-/// The desktop's sans-serif font, as fontconfig names it. iced's own default is a font many
-/// systems lack.
-pub fn system_font() -> Font {
+/// Aurora's font. Its Nerd Font glyphs are the icons.
+const FONT: &str = "JetBrainsMono Nerd Font";
+
+/// [`FONT`] when it is installed, else the desktop's monospace font as fontconfig names it.
+pub fn font() -> Font {
+    let installed = Command::new("fc-list")
+        .args(["-q", FONT])
+        .status()
+        .is_ok_and(|status| status.success());
+    if installed {
+        return Font::with_name(FONT);
+    }
     let family = Command::new("fc-match")
-        .args(["--format", "%{family[0]}", "sans-serif"])
+        .args(["--format", "%{family[0]}", "monospace"])
         .output()
         .ok()
         .filter(|out| out.status.success())
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
         .filter(|name| !name.is_empty());
-    match family {
+    Font {
         // Font names are &'static; this runs once.
-        Some(name) => Font::with_name(Box::leak(name.into_boxed_str())),
-        None => Font::DEFAULT,
+        family: family.map_or(Family::Monospace, |name| Family::Name(Box::leak(name.into_boxed_str()))),
+        ..Font::DEFAULT
     }
 }
 
-/// The iced theme for the widgets drawn with their default style.
+/// The iced theme, for what is drawn with iced's default styles (the scrollbar).
 pub fn iced_theme(p: &Palette) -> iced::Theme {
     iced::Theme::custom(
         "budctl",
@@ -214,7 +208,7 @@ pub fn iced_theme(p: &Palette) -> iced::Theme {
             background: p.bg,
             text: p.fg,
             primary: p.accent,
-            success: p.ok,
+            success: p.accent,
             warning: p.accent,
             danger: p.err,
         },
@@ -241,11 +235,9 @@ mod tests {
         .unwrap();
         assert_eq!(palette.bg, Color::from_rgb8(0x0f, 0x0c, 0x0a));
         assert_eq!(palette.accent, Color::from_rgb8(0x7b, 0x4b, 0x2f));
-        assert_eq!(palette.accent_dim, Color::from_rgb8(0x5c, 0x38, 0x23));
-        assert_eq!(palette.icon, Color::from_rgb8(0xe2, 0xbf, 0xae));
+        assert_eq!(palette.surface_high, Color::from_rgb8(0x2a, 0x21, 0x1d));
         assert_eq!(palette.line, Color::from_rgb8(0x52, 0x44, 0x3d));
         assert_eq!(palette.dim, Color::from_rgb8(0xd6, 0xc3, 0xb9));
-        assert_eq!(palette.ok, BUILT_IN.ok);
     }
 
     #[test]
