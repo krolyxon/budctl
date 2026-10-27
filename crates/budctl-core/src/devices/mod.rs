@@ -84,6 +84,14 @@ pub trait Session: Send {
         None
     }
 
+    /// Create a custom EQ preset called `name`, flat, with the bands of the buds' other custom
+    /// presets. Returns it as the buds list it afterwards.
+    fn create_custom_eq(&mut self, name: &str) -> Result<EqPreset> {
+        Err(Error::Unsupported(format!(
+            "budctl cannot create the preset {name} on these buds"
+        )))
+    }
+
     /// Set the bass level. Only the ack can be checked when the buds cannot report the level.
     fn set_bass_level(&mut self, _level: i8) -> Result<()> {
         Err(Error::Unsupported(

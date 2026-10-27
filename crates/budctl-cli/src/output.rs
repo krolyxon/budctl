@@ -342,6 +342,37 @@ pub fn custom_eq(
     Ok(())
 }
 
+/// A custom preset just created, as the buds list it.
+pub fn created_eq(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    created: &EqPreset,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(
+            out,
+            Some((device, model)),
+            serde_json::json!({ "created": format!("custom-{}", created.id), "preset": created }),
+        );
+    }
+    header(out, device, model)?;
+    let bands: Vec<String> = created
+        .bands
+        .iter()
+        .map(|b| format!("{} Hz {:+}", b.hz, b.gain))
+        .collect();
+    writeln!(
+        out,
+        "  New preset  custom-{} \"{}\": {}",
+        created.id,
+        created.name,
+        bands.join(", ")
+    )?;
+    Ok(())
+}
+
 /// The EQ preset after a change, as the buds report it on reading back.
 pub fn eq(
     out: &mut impl Write,

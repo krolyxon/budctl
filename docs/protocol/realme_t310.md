@@ -503,7 +503,13 @@ Evidence: *vendor*
   - **Expected frame** (*derived*), for `eq custom-4 50=+3 16000=-2` on the owner's list, with seq `06`: `AA 26 00 00 18 04 06 1F 00 02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 03 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E FE`.
   - **On the owner's T310** (*ours-2026-10-27*, W11b): that frame went out byte for byte. The buds answered `0x8418 00 04` within 53 ms, and the list read about 150 ms after the ack already had +3 dB at 50 Hz, -2 dB at 16000 Hz, the name unchanged and `selected` `01`. Writing the flat bands back worked the same way.
   - **`02` selects the preset** (*ours-2026-10-27*): after `eq pure-raw`, a bare `eq custom-4` (the preset saved unchanged) made `0x010F` read `custom-4` again.
-  - Create (`01`) and delete (`03`) come later, if they are wanted at all: with one preset already on the buds, editing it gives a custom EQ without them.
+  - <a id="custom-eq-create"></a>**W11c, create** (`01`), wanted by the owner (2026-10-28): `budctl eq new <name>` reads the list first. It refuses before sending anything when the buds keep 3 presets already, when a preset has that name already, or when there is no preset to copy the bands from.
+    - **The name:** 1 to 16 bytes of UTF-8, with no control characters and no spaces at either end. The 16 bytes are budctl's own limit: the protocol allows 255 (one length byte), and the vendor's limit is unknown.
+    - **The new preset** copies the range bytes and the bands (frequencies and order) of the first listed preset, with every gain at 0 and id `00`. The vendor default bands do not hold on the T310 (see above).
+    - **Check:** the reply `00 <id>` gives the new id. Ids can be renumbered after a create, so budctl reads the list again, as for [read-back](#write-read-back). It finds the preset by that id and its name, else by its name alone.
+    - **Unknown:** whether a create also selects the new preset. The read-back list shows it.
+    - **Expected frame** (*derived*), for `eq new Test` on the owner's list, with seq `06`: `AA 23 00 00 18 04 06 1C 00 01 FA 06 00 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00`.
+  - Renaming (a save with a new name) and deleting (`03`) come next, one checkpoint each.
 
 <a id="absent"></a>
 ## 11. Not on the T310
@@ -550,7 +556,7 @@ The owner runs each checkpoint with `--debug` and pastes the output. Results go 
 | W8 | `touch <side> <gesture> <action>` (`--dry-run` first) |
 | W9 | `touch cycle` |
 | W10 | ~~`fit-test`~~: dropped, the T310 runs no test ([§10.8](#fit-test)) |
-| W11 | W11a: `eq` lists the custom presets (read-only); W11b: save an edited preset (`eq custom-<id> <hz>=<gain>…`); create and delete only if wanted |
+| W11 | W11a: `eq` lists the custom presets (read-only); W11b: save an edited preset (`eq custom-<id> <hz>=<gain>…`); W11c: create one (`eq new <name>`); W11d: rename one; delete only if wanted |
 
 The owner will not install realme Link (2026-10-27), so there is no app capture. W6 and W11 use only the vendor-documented bytes in this spec, one checkpoint at a time.
 

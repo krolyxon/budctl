@@ -68,8 +68,11 @@ enum Command {
     /// List the EQ presets, or select one (pure-raw, deep-bass, pure-vocals, pure-bass, custom-<id>) and read it back.
     ///
     /// For a custom preset, `<hz>=<gain>` pairs change those bands' gains (dB), then save and
-    /// select it: `budctl eq custom-4 50=+3 16000=-2`.
+    /// select it: `budctl eq custom-4 50=+3 16000=-2`. `budctl eq new <name>` creates a preset.
+    #[command(args_conflicts_with_subcommands = true)]
     Eq {
+        #[command(subcommand)]
+        action: Option<EqCommand>,
         preset: Option<String>,
         /// Bands to change, as `<hz>=<gain>`. Custom presets only.
         #[arg(requires = "preset", value_parser = parse_band, allow_negative_numbers = true)]
@@ -107,6 +110,16 @@ enum Command {
 enum FindAction {
     Start,
     Stop,
+}
+
+#[derive(Subcommand)]
+enum EqCommand {
+    /// Create a custom preset, flat, with the bands of the buds' custom presets, then read it back.
+    New {
+        /// Its name, 1 to 16 bytes.
+        #[arg(value_parser = parse_name)]
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -268,6 +281,13 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let now = session.set_noise_control(mode.into())?;
             output::noise_control(out, &device, model, &now, cli.json)
         }
+        Command::Eq {
+            action: Some(EqCommand::New { ref name }),
+            ..
+        } => {
+            let created = session.create_custom_eq(name)?;
+            output::created_eq(out, &device, model, &created, cli.json)
+        }
         Command::Eq { preset: None, .. } => {
             let presets = session.eq_presets()?;
             output::eq_presets(out, &device, model, &presets, cli.json)
@@ -275,6 +295,7 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         Command::Eq {
             preset: Some(ref preset),
             ref bands,
+            ..
         } if !bands.is_empty() => {
             let now = session.set_custom_eq(preset, bands)?;
             output::custom_eq(out, &device, model, &now, cli.json)
@@ -306,6 +327,18 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
     }
 }
 
+/// A preset name, checked before connecting: not empty, no spaces around it, no control
+/// characters. The buds' own limits are checked once their list is read.
+fn parse_name(text: &str) -> Result<String, String> {
+    if text.is_empty() || text.trim() != text {
+        return Err("a preset name cannot be empty, or start or end with a space".to_owned());
+    }
+    if text.chars().any(char::is_control) {
+        return Err("a preset name cannot hold control characters".to_owned());
+    }
+    Ok(text.to_owned())
+}
+
 /// `50=+3` → 50 Hz at +3 dB.
 fn parse_band(text: &str) -> Result<EqBand, String> {
     let (hz, gain) = text
@@ -324,5 +357,40 @@ fn exit_code(error: &Error) -> u8 {
         Kind::NotFound => 2,
         Kind::Busy => 3,
         Kind::Failed => 4,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Command {
+        Cli::try_parse_from(std::iter::once("budctl").chain(args.iter().copied()))
+            .unwrap()
+            .command
+    }
+
+    #[test]
+    fn eq_takes_a_preset_bands_or_new() {
+        assert!(matches!(
+            parse(&["eq"]),
+            Command::Eq {
+                action: None,
+                preset: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(&["eq", "custom-4", "50=+3", "16000=-2"]),
+            Command::Eq { action: None, preset: Some(p), bands } if p == "custom-4" && bands.len() == 2
+        ));
+        assert!(matches!(
+            parse(&["eq", "deep-bass"]),
+            Command::Eq { action: None, preset: Some(p), .. } if p == "deep-bass"
+        ));
+        assert!(matches!(
+            parse(&["eq", "new", "Gym mix"]),
+            Command::Eq { action: Some(EqCommand::New { name }), .. } if name == "Gym mix"
+        ));
     }
 }

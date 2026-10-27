@@ -27,6 +27,19 @@ fn usage_errors_exit_1() {
 }
 
 #[test]
+fn eq_new_checks_the_name_before_connecting() {
+    for args in [
+        &["eq", "new"][..],
+        &["eq", "new", ""],
+        &["eq", "new", " Gym"],
+        &["eq", "new", "a\tb"],
+    ] {
+        let out = budctl(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+    }
+}
+
+#[test]
 fn find_start_needs_yes_before_connecting() {
     let out = budctl(&["find", "start"]);
     assert_eq!(out.status.code(), Some(1));

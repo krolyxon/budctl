@@ -62,6 +62,13 @@ pub(super) const CUSTOM_EQ_LIST: u16 = 0x0122;
 pub(super) const CUSTOM_EQ_WRITE: u16 = 0x0418;
 /// The `0x0418` action that saves a whole preset and selects it. Spec: realme_t310.md#custom-eq
 const CUSTOM_EQ_SAVE: u8 = 0x02;
+/// The `0x0418` action that creates a preset; the buds give it an id. Spec: realme_t310.md#custom-eq
+const CUSTOM_EQ_CREATE: u8 = 0x01;
+/// The most custom presets the buds keep. Spec: realme_t310.md#custom-eq
+pub(super) const CUSTOM_EQ_MAX: usize = 3;
+/// The longest preset name budctl writes, in bytes. budctl's own limit: the name's length is one
+/// byte, and the vendor's limit is unknown. Spec: realme_t310.md#custom-eq-create
+const CUSTOM_EQ_NAME_MAX: usize = 16;
 /// Spec: realme_t310.md#events-offered
 pub(super) const EVENTS_OFFERED: u16 = 0x0200;
 /// Spec: realme_t310.md#subscribe
@@ -586,8 +593,69 @@ pub(super) fn retune(preset: &CustomEq, changes: &[EqBand]) -> Result<CustomEq> 
 /// `02 <min> <max> <id> <nameLen> <name> <bands> (<freq u16 LE> <gain s8>)…`: save the whole
 /// preset and select it. Spec: realme_t310.md#custom-eq
 pub(super) fn custom_eq_save_payload(preset: &CustomEq) -> Result<Vec<u8>> {
+    custom_eq_payload(CUSTOM_EQ_SAVE, preset)
+}
+
+/// `01 <min> <max> 00 <nameLen> <name> <bands> …`: create a preset, as [`new_custom_eq`] makes
+/// it. Spec: realme_t310.md#custom-eq-create
+pub(super) fn custom_eq_create_payload(preset: &CustomEq) -> Result<Vec<u8>> {
+    custom_eq_payload(CUSTOM_EQ_CREATE, preset)
+}
+
+/// A preset name as budctl writes it: 1 to [`CUSTOM_EQ_NAME_MAX`] bytes of UTF-8, no control
+/// characters, no spaces around it. Spec: realme_t310.md#custom-eq-create
+pub(super) fn custom_eq_name(name: &str) -> Result<Vec<u8>> {
+    if name.is_empty() || name.trim() != name {
+        return Err(Error::Usage(
+            "a preset name cannot be empty, or start or end with a space".to_owned(),
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(Error::Usage("a preset name cannot hold control characters".to_owned()));
+    }
+    if name.len() > CUSTOM_EQ_NAME_MAX {
+        return Err(Error::Usage(format!(
+            "a preset name can be at most {CUSTOM_EQ_NAME_MAX} bytes; \"{name}\" has {}",
+            name.len()
+        )));
+    }
+    Ok(name.as_bytes().to_vec())
+}
+
+/// A new preset called `name`: the range and the bands of `model`, a preset the buds have, with
+/// every gain at 0, and id `00` for the buds to replace. Spec: realme_t310.md#custom-eq-create
+pub(super) fn new_custom_eq(name: &str, model: &CustomEq) -> Result<CustomEq> {
+    Ok(CustomEq {
+        selected: false,
+        min: model.min,
+        max: model.max,
+        id: 0x00,
+        name: custom_eq_name(name)?,
+        bands: model.bands.iter().map(|b| EqBand { hz: b.hz, gain: 0 }).collect(),
+    })
+}
+
+/// The id in a `0x0418` reply: `00 <id>`. Spec: realme_t310.md#custom-eq
+pub(super) fn decode_custom_eq_write_reply(reply: &[u8]) -> Result<u8> {
+    let mut r = ok_reply(reply, "the custom EQ write")?;
+    r.u8()
+}
+
+/// The preset a create made, in the list read after it: the one with that name and the id the
+/// buds answered, else the only one with that name. Spec: realme_t310.md#custom-eq-create
+pub(super) fn find_created<'a>(list: &'a [CustomEq], name: &[u8], id: u8) -> Option<&'a CustomEq> {
+    let mut named = list.iter().filter(|p| p.name == name);
+    list.iter()
+        .find(|p| p.name == name && p.id == id)
+        .or_else(|| match (named.next(), named.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
+        })
+}
+
+fn custom_eq_payload(action: u8, preset: &CustomEq) -> Result<Vec<u8>> {
     let too_long = |what: &str| Error::Protocol(format!("the preset's {what} does not fit in a byte"));
-    let mut payload = vec![CUSTOM_EQ_SAVE];
+    let mut payload = vec![action];
     payload.extend([preset.min.to_le_bytes()[0], preset.max.to_le_bytes()[0], preset.id]);
     payload.push(u8::try_from(preset.name.len()).map_err(|_| too_long("name"))?);
     payload.extend(&preset.name);
@@ -1129,5 +1197,55 @@ mod tests {
         assert!(usage(&[EqBand { hz: 50, gain: 7 }]));
         assert!(usage(&[EqBand { hz: 50, gain: -7 }]));
         assert!(usage(&[EqBand { hz: 50, gain: 1 }, EqBand { hz: 50, gain: 2 }]));
+    }
+
+    #[test]
+    fn creates_a_flat_copy_of_the_owners_preset() {
+        let list = decode_custom_eq_list(&hex(OWNER_CUSTOM_EQS)).unwrap();
+        let new = new_custom_eq("Test", &list[0]).unwrap();
+        assert_eq!((new.id, new.min, new.max), (0x00, -6, 6));
+        assert!(new.bands.iter().all(|b| b.gain == 0));
+        let hz: Vec<u16> = new.bands.iter().map(|b| b.hz).collect();
+        assert_eq!(hz, [50, 250, 1000, 4000, 8000, 16000]);
+        // Spec: realme_t310.md#custom-eq-create (the expected frame, with seq 06)
+        let frame =
+            crate::devices::realme_t310::frame::encode(CUSTOM_EQ_WRITE, 0x06, &custom_eq_create_payload(&new).unwrap())
+                .unwrap();
+        assert_eq!(
+            frame,
+            hex("AA 23 00 00 18 04 06 1C 00 01 FA 06 00 04 54 65 73 74 06 \
+                 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00")
+        );
+    }
+
+    #[test]
+    fn preset_names() {
+        assert_eq!(custom_eq_name("Gym").unwrap(), b"Gym");
+        assert_eq!(custom_eq_name("Bass é").unwrap().len(), 7);
+        for bad in ["", " Gym", "Gym ", "a\tb", "seventeen bytes!!"] {
+            assert!(matches!(custom_eq_name(bad), Err(Error::Usage(_))), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn finds_the_created_preset() {
+        let preset = |id, name: &str| CustomEq {
+            selected: false,
+            min: -6,
+            max: 6,
+            id,
+            name: name.as_bytes().to_vec(),
+            bands: Vec::new(),
+        };
+        let list = [preset(4, "Custom1"), preset(5, "Test")];
+        assert_eq!(find_created(&list, b"Test", 5).map(|p| p.id), Some(5));
+        // Renumbered after the reply: the name still finds it.
+        assert_eq!(find_created(&list, b"Test", 9).map(|p| p.id), Some(5));
+        assert!(find_created(&list, b"Other", 5).is_none());
+        let twins = [preset(4, "Test"), preset(5, "Test")];
+        assert_eq!(find_created(&twins, b"Test", 5).map(|p| p.id), Some(5));
+        assert!(find_created(&twins, b"Test", 9).is_none());
+        assert_eq!(decode_custom_eq_write_reply(&hex("00 05")).unwrap(), 5);
+        assert!(decode_custom_eq_write_reply(&hex("01 05")).is_err());
     }
 }

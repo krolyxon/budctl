@@ -379,6 +379,51 @@ impl Session for T310Session {
     }
 
     /// Ack-only: the T310 never answers the bass-level read. Spec: realme_t310.md#bass-write
+    /// Spec: realme_t310.md#custom-eq-create, #write-read-back
+    fn create_custom_eq(&mut self, name: &str) -> Result<EqPreset> {
+        if !self.commands.allows(codec::CUSTOM_EQ_WRITE) || !self.commands.allows(codec::CUSTOM_EQ_LIST) {
+            return Err(Error::Unsupported(
+                "these buds do not offer custom EQ presets".to_owned(),
+            ));
+        }
+        let list = codec::decode_custom_eq_list(&self.link.request(codec::CUSTOM_EQ_LIST, &[])?)?;
+        if list.len() >= codec::CUSTOM_EQ_MAX {
+            return Err(Error::Usage(format!(
+                "these buds keep at most {} custom presets, and have {}; change one of them instead",
+                codec::CUSTOM_EQ_MAX,
+                list.len()
+            )));
+        }
+        if list.iter().any(|p| p.name == name.as_bytes()) {
+            return Err(Error::Usage(format!("a custom preset is called {name} already")));
+        }
+        // The new preset copies the bands the buds use: the vendor's defaults do not hold here.
+        let Some(model) = list.first() else {
+            return Err(Error::Usage(
+                "budctl copies a new preset's bands from one the buds have, and these buds have none".to_owned(),
+            ));
+        };
+        let new = codec::new_custom_eq(name, model)?;
+        let reply = self
+            .link
+            .request(codec::CUSTOM_EQ_WRITE, &codec::custom_eq_create_payload(&new)?)?;
+        let id = codec::decode_custom_eq_write_reply(&reply)?;
+        let created = self.read_back(
+            READ_BACK,
+            codec::CUSTOM_EQ_LIST,
+            &[],
+            |reply| {
+                let now = codec::decode_custom_eq_list(reply)?;
+                let created = codec::find_created(&now, &new.name, id).cloned();
+                Ok((created.is_some(), created))
+            },
+            |_| format!("the buds accepted the new preset {name}, but their list does not have it"),
+        )?;
+        created
+            .map(|p| p.preset())
+            .ok_or_else(|| Error::Protocol(format!("the new preset {name} vanished from the list")))
+    }
+
     /// Spec: realme_t310.md#bass-write
     fn bass_range(&self) -> Option<(i8, i8)> {
         self.commands
@@ -1201,6 +1246,49 @@ mod tests {
         let result = open(&script).unwrap().set_bass_level(6);
         script.assert_done();
         assert!(matches!(result, Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn creates_a_custom_preset_and_finds_it_in_the_list() {
+        const LIST: &str =
+            "00 01 01 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+        const AFTER: &str = "00 02 01 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00 \
+             00 FA 06 05 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0122, 0x05, ""),
+            rx(0x8122, 0x05, LIST),
+            tx(
+                0x0418,
+                0x06,
+                "01 FA 06 00 04 54 65 73 74 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00",
+            ),
+            rx(0x8418, 0x06, "00 05"),
+            tx(0x0122, 0x07, ""),
+            rx(0x8122, 0x07, AFTER),
+        ]);
+        let script = Script::new(steps);
+        let created = open(&script).unwrap().create_custom_eq("Test").unwrap();
+        script.assert_done();
+        assert_eq!((created.id, created.name.as_str()), (5, "Test"));
+        assert_eq!(created.bands.len(), 6);
+    }
+
+    #[test]
+    fn refuses_a_fourth_preset_or_a_taken_name_before_writing() {
+        let one = "00 FA 06 04 07 43 75 73 74 6F 6D 31 00";
+        for (list, name) in [
+            (format!("00 03 {one} {one} {one}"), "Test"),
+            (format!("00 01 {one}"), "Custom1"),
+            ("00 00".to_owned(), "Test"),
+        ] {
+            let mut steps = handshake();
+            steps.extend([tx(0x0122, 0x05, ""), rx(0x8122, 0x05, &list)]);
+            let script = Script::new(steps);
+            let result = open(&script).unwrap().create_custom_eq(name);
+            script.assert_done();
+            assert!(matches!(result, Err(Error::Usage(_))), "{list}");
+        }
     }
 
     #[test]
