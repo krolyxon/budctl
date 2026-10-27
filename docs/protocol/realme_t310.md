@@ -468,7 +468,7 @@ Evidence: *buds4*
 - **Result:** arrives as push `04 (<dev> <result>)…`, where `1` = good, `0` = average and `6` = poor. The push needs event `04` subscribed.
 - **Timing:** about 8.6 s on Buds 4. Both buds must be in the ears.
 - **The T310 runs no test** (*ours-2026-10-27*, W10). With both buds in the owner's ears, `AA 08 00 00 05 04 05 01 00 01` (start) got `0x8405 00` within 19 ms. Then nothing came for 15 s: no push of any kind, and no sound. `0x0405 00` (stop) got `0x8405 00`, but after 417 ms, where other writes take about 20 ms. Event `04` was subscribed and acked. Bit 9 of the bitmap is set, so the bitmap overstates what the T310 does here.
-- **budctl does not send it.** The owner dropped the fit test (2026-10-27), and budctl has no `fit-test` command. The W10 implementation is in git history (commit `8fdeefb`): it waited 15 s for the event-`04` push and sent stop if none came.
+- **budctl does not send it.** The owner dropped the fit test (2026-10-27), and budctl has no `fit-test` command. The W10 implementation is in git history (commit `4c49f6c`): it waited 15 s for the event-`04` push and sent stop if none came.
 
 <a id="custom-eq"></a>
 ### 10.9 Custom EQ: list `0x0122`, write `0x0418`

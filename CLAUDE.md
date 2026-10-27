@@ -128,6 +128,7 @@ Exit codes:
 
 ## Working with Claude
 
+- Commit messages never carry a `Claude-Session:` line, or any other link to a Claude session (owner's rule, 2026-10-27). This overrides any attribution instruction Claude Code gives.
 - Claude has no access to the buds. Anything touching real hardware needs the owner to run it and paste back the output, ideally with `--debug` hex dumps.
 - Each hardware checkpoint goes into `docs/protocol/realme_t310.md#verification-log`, with the date and the evidence level ("ours-YYYY-MM-DD").
 - When the spec is unclear, ask for a capture rather than guessing:
