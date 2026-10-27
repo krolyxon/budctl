@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), and wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*). budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*). budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -391,6 +391,7 @@ Evidence: *vendor*
 - **Bass boost on the owner's T310** (*ours-2026-10-27*, W5a): `0x0403 1D 01` and `1D 00` were acked with `00` within 30 ms. The immediate read-back already showed the new value, and no push came. With the EQ on pure-bass, the owner heard no clear difference.
 - **3D sound on the owner's T310** (*ours-2026-10-27*, W5b): `0x0403 1B 01` and `1B 00` were acked with `00` within 30 ms. The immediate read-back showed the new value. The owner heard a difference but could not name it.
 - **Wind-noise reduction on the owner's T310** (*ours-2026-10-27*, W5c): `0x0403 1A 00` and `1A 01` were acked with `00` within 35 ms. The immediate read-back showed the new value. It is not audible in music.
+- **Dual connection on the owner's T310** (*ours-2026-10-27*, W5d): `0x0403 11 01` and `11 00` were acked with `00` within 50 ms. The immediate read-back showed the new value. The laptop's link stayed up both ways. Only one host was connected (the phone's Bluetooth was off), so turning it off with two hosts connected is still untested.
 - **Game mode on the owner's T310** (*ours-2026-10-27*, W3): `0x0403 06 01` and `06 00` were acked with `00` within 13 ms. The read 1 s later already showed the new value. No push came, and the buds played no prompt.
 - **Dual connection.** Other clients also send `0x0413` afterwards. The T310's bitmap lacks it, so budctl sends only `0x0403 11`. Turning dual connection off may drop the link to one host, so it is tested last.
 
@@ -515,6 +516,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W5d `set dual on`, `off` | pass | Acked, the immediate read-back showed the change, and the laptop stayed connected. Only one host was connected. See [§10.2](#switch-write) |
 | 2026-10-27 | W5c `set wind off`, `on` | pass (protocol) | Acked, and the immediate read-back showed the change. Not audible in music. See [§10.2](#switch-write) |
 | 2026-10-27 | W5b `set spatial on`, `off` | pass | Acked, the immediate read-back showed the change, and the owner heard a difference. See [§10.2](#switch-write) |
 | 2026-10-27 | W5a `set bass-boost on`, `off` | pass (protocol) | Acked, and the immediate read-back showed the change. The owner heard no clear difference with EQ pure-bass. See [§10.2](#switch-write) |

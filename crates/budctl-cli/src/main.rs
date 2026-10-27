@@ -48,7 +48,7 @@ enum Command {
     },
     /// Select an EQ preset (pure-raw, deep-bass, pure-vocals, pure-bass), then read it back.
     Eq { preset: String },
-    /// Turn an on/off setting on or off, then read it back. Switches: game, bass-boost, spatial (3D sound), wind.
+    /// Turn an on/off setting on or off, then read it back. Switches: game, bass-boost, spatial (3D sound), wind, dual.
     Set {
         /// The switch's name, as `status --json` lists it.
         switch: String,
