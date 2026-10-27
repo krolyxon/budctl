@@ -55,11 +55,25 @@ enum Command {
         #[arg(value_enum)]
         state: OnOff,
     },
+    /// Ring the buds so you can find them (loud: take them out of your ears first).
+    Find {
+        #[arg(value_enum)]
+        action: FindAction,
+        /// Confirm that the buds are out of your ears. Needed to start ringing.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Turn game mode (low latency) on or off, then read it back.
     Game {
         #[arg(value_enum)]
         state: OnOff,
     },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum FindAction {
+    Start,
+    Stop,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -124,6 +138,17 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
+    // Checked before connecting: ringing is loud. Spec: realme_t310.md#find
+    if let Command::Find {
+        action: FindAction::Start,
+        yes: false,
+    } = cli.command
+    {
+        return Err(Error::Usage(
+            "this rings the buds loudly; take them out of your ears, then run `budctl find start --yes`".to_owned(),
+        )
+        .into());
+    }
     let found = budctl_core::scan()?;
     if let Command::List = cli.command {
         return output::list(out, &found, cli.json);
@@ -152,6 +177,11 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         Command::Set { ref switch, state } => {
             let now = session.set_switch(switch, matches!(state, OnOff::On))?;
             output::switch(out, &device, model, &now, cli.json)
+        }
+        Command::Find { action, .. } => {
+            let ring = matches!(action, FindAction::Start);
+            session.find(ring)?;
+            output::find(out, &device, model, ring, cli.json)
         }
         Command::Game { state } => {
             let now = session.set_switch("game", matches!(state, OnOff::On))?;

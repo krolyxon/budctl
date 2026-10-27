@@ -292,6 +292,15 @@ impl Session for T310Session {
         )
     }
 
+    /// Spec: realme_t310.md#find
+    fn find(&mut self, ring: bool) -> Result<()> {
+        if !self.commands.allows(codec::FIND) {
+            return Err(Error::Unsupported("these buds cannot ring through budctl".to_owned()));
+        }
+        let reply = self.link.request(codec::FIND, &codec::find_payload(ring))?;
+        codec::check_write_reply(&reply, if ring { "ringing" } else { "stopping the ringing" })
+    }
+
     /// Spec: realme_t310.md#switch-write, #write-read-back
     fn set_switch(&mut self, key: &str, on: bool) -> Result<Switch> {
         let Some(id) = codec::switch_id(key) else {
@@ -735,5 +744,37 @@ mod tests {
             Err(Error::Usage(message)) => assert!(message.contains("pure-raw, deep-bass, pure-vocals, pure-bass")),
             other => panic!("expected a usage error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rings_and_stops() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0400, 0x05, "01"),
+            rx(0x8400, 0x05, "00"),
+            tx(0x0400, 0x06, "00"),
+            rx(0x8400, 0x06, "00"),
+        ]);
+        let script = Script::new(steps);
+        let mut session = open(&script).unwrap();
+        session.find(true).unwrap();
+        session.find(false).unwrap();
+        script.assert_done();
+    }
+
+    #[test]
+    fn find_is_not_sent_without_its_bitmap_bit() {
+        // Bits 0-4 only: no bit 5.
+        let script = Script::new(vec![
+            tx(0x0100, 0x01, ""),
+            rx(0x8100, 0x01, "00 1F"),
+            tx(0x0103, 0x02, ""),
+            rx(0x8103, 0x02, "00 12 3C 06"),
+            tx(0x0200, 0x03, ""),
+            rx(0x8200, 0x03, "00 00"),
+        ]);
+        let result = open(&script).unwrap().find(true);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Unsupported(_))));
     }
 }

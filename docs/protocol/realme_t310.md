@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*). budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*), and [§10.3](#eq-write) the built-in EQ presets (W4, verified *ours-2026-10-27*), the bass-boost switch `1D` (W5a, verified *ours-2026-10-27*), 3D sound `1B` (W5b, verified *ours-2026-10-27*), wind-noise reduction `1A` (W5c, verified *ours-2026-10-27*), and dual connection `11` (W5d, verified *ours-2026-10-27*); [§10.5](#find) find (W7, verified *ours-2026-10-27*). Bass level (W6) waits for a realme Link capture. budctl reads it back at once, because the spec gives it no special timing. The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -418,8 +418,9 @@ Evidence: *vendor*
 Evidence: *buds4*
 
 - `01` starts ringing both buds and `00` stops it. The reply is `0x8400 00`.
-- **It is loud**, so budctl warns before ringing.
+- **It is loud.** `budctl find start` refuses to run (exit 1) without `--yes`, and checks that before it connects. `find stop` needs no flag.
 - Only the ack can be checked: there is no state to read back.
+- **On the owner's T310** (*ours-2026-10-27*, W7): `0x0400 01` and `0x0400 00` were each acked with `0x8400 00` within 18 ms. `01` rang both buds. **The ringing continues after budctl disconnects**, until `00` silences it, so budctl does not need to hold the link while the buds ring.
 
 <a id="gesture-write"></a>
 ### 10.6 Touch controls: `0x0401 <count> (<dev> <btn> <act> <fn>)…`
@@ -516,6 +517,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W7 `find start --yes`, `find stop` | pass | Both acked. Both buds rang, kept ringing after budctl disconnected, and stopped on `find stop`. See [§10.5](#find) |
 | 2026-10-27 | W5d `set dual on`, `off` | pass | Acked, the immediate read-back showed the change, and the laptop stayed connected. Only one host was connected. See [§10.2](#switch-write) |
 | 2026-10-27 | W5c `set wind off`, `on` | pass (protocol) | Acked, and the immediate read-back showed the change. Not audible in music. See [§10.2](#switch-write) |
 | 2026-10-27 | W5b `set spatial on`, `off` | pass | Acked, the immediate read-back showed the change, and the owner heard a difference. See [§10.2](#switch-write) |

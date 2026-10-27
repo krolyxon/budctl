@@ -245,3 +245,23 @@ pub fn eq(
     writeln!(out, "  EQ  {now}")?;
     Ok(())
 }
+
+/// After `find start` or `find stop`: the buds acked; there is nothing to read back.
+pub fn find(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    ring: bool,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(out, Some((device, model)), serde_json::json!({ "ringing": ring }));
+    }
+    header(out, device, model)?;
+    if ring {
+        writeln!(out, "  Ringing. Stop with: budctl find stop")?;
+    } else {
+        writeln!(out, "  Stopped ringing.")?;
+    }
+    Ok(())
+}

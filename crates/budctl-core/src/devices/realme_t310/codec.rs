@@ -25,6 +25,13 @@ pub(super) const NOISE_CONTROL_WRITE: u16 = 0x0404;
 pub(super) const SWITCH_WRITE: u16 = 0x0403;
 /// Spec: realme_t310.md#eq-write
 pub(super) const EQ_SELECT: u16 = 0x0406;
+/// Spec: realme_t310.md#find
+pub(super) const FIND: u16 = 0x0400;
+
+/// `01` starts ringing, `00` stops it. Spec: realme_t310.md#find
+pub(super) fn find_payload(ring: bool) -> [u8; 1] {
+    [u8::from(ring)]
+}
 /// Spec: realme_t310.md#eq-read
 pub(super) const EQ_PRESET: u16 = 0x010F;
 /// Spec: realme_t310.md#codec
@@ -581,6 +588,12 @@ mod tests {
             let reply = [0x00, eq_id(name).unwrap()];
             assert_eq!(decode_eq(&reply).unwrap(), name);
         }
+    }
+
+    #[test]
+    fn find_payloads() {
+        assert_eq!(find_payload(true), [0x01]);
+        assert_eq!(find_payload(false), [0x00]);
     }
 
     #[test]

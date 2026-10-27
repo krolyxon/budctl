@@ -55,6 +55,12 @@ pub trait Session: Send {
         ))
     }
 
+    /// Start (`true`) or stop ringing the buds so they can be found. Only the ack can be
+    /// checked: there is no state to read back.
+    fn find(&mut self, _ring: bool) -> Result<()> {
+        Err(Error::Unsupported("these buds cannot ring through budctl".to_owned()))
+    }
+
     /// Turn an on/off setting ([`Switch::key`]) on or off, then read it back.
     fn set_switch(&mut self, key: &str, _on: bool) -> Result<Switch> {
         Err(Error::Unsupported(format!("budctl cannot change {key} on these buds")))

@@ -25,3 +25,10 @@ fn usage_errors_exit_1() {
         assert_eq!(out.status.code(), Some(1), "{args:?}");
     }
 }
+
+#[test]
+fn find_start_needs_yes_before_connecting() {
+    let out = budctl(&["find", "start"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--yes"));
+}
