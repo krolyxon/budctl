@@ -24,6 +24,10 @@ pub enum Icon {
     Chevron,
     Bolt,
     Check,
+    Find,
+    Info,
+    Chip,
+    Keys,
 }
 
 /// `icon` at `size` pixels, in `color`.
@@ -240,6 +244,39 @@ fn draw_icon(pen: &mut Pen, icon: Icon) {
             pen.rect(17.5, 8.0, 4.5, 11.0, 1.2);
         }
         Icon::Chevron => pen.polyline(&[(9.0, 5.5), (15.5, 12.0), (9.0, 18.5)], false),
+        Icon::Find => {
+            pen.circle(12.0, 12.0, 6.5);
+            pen.dot(12.0, 12.0, 2.0);
+            for (from, to) in [
+                ((12.0, 2.0), (12.0, 5.0)),
+                ((12.0, 19.0), (12.0, 22.0)),
+                ((2.0, 12.0), (5.0, 12.0)),
+                ((19.0, 12.0), (22.0, 12.0)),
+            ] {
+                pen.line(from, to);
+            }
+        }
+        Icon::Info => {
+            pen.circle(12.0, 12.0, 9.0);
+            pen.line((12.0, 11.0), (12.0, 16.5));
+            pen.dot(12.0, 7.8, 1.2);
+        }
+        Icon::Chip => {
+            pen.rect(6.5, 6.5, 11.0, 11.0, 2.0);
+            for at in [9.5, 14.5] {
+                pen.line((at, 2.5), (at, 6.5));
+                pen.line((at, 17.5), (at, 21.5));
+                pen.line((2.5, at), (6.5, at));
+                pen.line((17.5, at), (21.5, at));
+            }
+        }
+        Icon::Keys => {
+            pen.rect(2.5, 6.0, 19.0, 12.0, 2.5);
+            for x in [6.5, 10.0, 13.5, 17.0] {
+                pen.dot(x, 10.0, 0.9);
+            }
+            pen.line((8.0, 14.0), (16.0, 14.0));
+        }
         Icon::Check => pen.polyline(&[(4.5, 12.5), (9.5, 17.5), (19.5, 7.0)], false),
     }
 }

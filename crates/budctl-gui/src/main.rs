@@ -5,11 +5,13 @@
 //! (`keys.rs`). `--demo` shows made-up buds instead.
 
 mod buds;
+mod earbuds;
 mod equalizer;
 mod gestures;
 mod icons;
 mod keys;
 mod overview;
+mod settings;
 mod theme;
 mod ui;
 mod worker;
@@ -186,6 +188,8 @@ enum Item {
     Gesture(u8),
     /// A mode of the hold cycle, by its place among the modes the buds offer.
     Cycle(u8),
+    /// Find my earbuds.
+    Find,
 }
 
 /// What a page needs besides the buds: the item under the keyboard cursor, if it shows, and the
@@ -251,6 +255,11 @@ enum Message {
     },
     /// Put a mode (by its place) in the hold cycle, or take it out.
     Cycle(u8, bool),
+    /// Ring the buds (after a confirmation), or stop them ringing.
+    Find,
+    /// The answer to "Ring the buds?".
+    ConfirmFind(bool),
+    ShowHelp,
     /// Read the buds again.
     Refresh,
     Worker(Event),
@@ -291,6 +300,12 @@ struct App {
     draft: Option<Draft>,
     /// A gesture's action picked and not written yet.
     touch_draft: Option<TouchDraft>,
+    /// The buds were told to ring and not yet to stop.
+    ringing: bool,
+    /// "Ring the buds?" is open.
+    confirm_find: bool,
+    /// Why the palette file could not be used, if it could not.
+    palette_problem: Option<String>,
 }
 
 impl App {
@@ -324,6 +339,9 @@ impl App {
             read_at: None,
             draft: None,
             touch_draft: None,
+            ringing: false,
+            confirm_find: false,
+            palette_problem: None,
         };
         app.refresh_palette();
         app
@@ -349,6 +367,15 @@ impl App {
                 }
             }
             Message::Cycle(mode, on) => self.cycle(mode, on),
+            Message::Find if self.ringing => self.write(Item::Find, Command::Find(false)),
+            Message::Find => self.confirm_find = true,
+            Message::ConfirmFind(ring) => {
+                self.confirm_find = false;
+                if ring {
+                    self.write(Item::Find, Command::Find(true));
+                }
+            }
+            Message::ShowHelp => self.help = true,
             Message::Refresh => self.refresh(),
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
@@ -399,6 +426,7 @@ impl App {
                         touch.hold_cycle = Some(modes);
                     }
                 }
+                Command::Find(ring) => self.ringing = ring,
                 Command::CustomEq(_, bands) => {
                     if let Some(preset) = self.buds.preset(item_preset(item)) {
                         let mut preset = preset.clone();
@@ -506,6 +534,11 @@ impl App {
                 if let Some(Some(Item::Gesture(row))) = done {
                     self.save_touch(row);
                 }
+            }
+            Event::Ringing(ring) => {
+                self.in_flight.pop_front();
+                self.ringing = ring;
+                self.link = Link::Live;
             }
             Event::HoldCycle(modes) => {
                 self.in_flight.pop_front();
@@ -689,6 +722,11 @@ impl App {
             self.help = false;
             return Task::none();
         }
+        if self.confirm_find {
+            // Only Enter rings the buds; any other key says no.
+            let ring = matches!(key, Key::Named(keyboard::key::Named::Enter));
+            return self.update(Message::ConfirmFind(ring));
+        }
         match action {
             Action::Quit => iced::exit(),
             Action::Help => {
@@ -725,6 +763,7 @@ impl App {
             Page::Overview if self.has_reading() => overview::items(&self.buds),
             Page::Equalizer if self.has_reading() => equalizer::items(&self.buds),
             Page::Gestures if self.has_reading() => gestures::items(&self.buds),
+            Page::Earbuds if self.has_reading() => earbuds::items(),
             _ => Vec::new(),
         }
     }
@@ -830,6 +869,7 @@ impl App {
                     save: true,
                 })
             }
+            Item::Find => (action != Action::Left).then_some(Message::Find),
             Item::Cycle(mode) => {
                 let touch = self.buds.touch.as_ref()?;
                 let on = touch
@@ -860,9 +900,13 @@ impl App {
     fn refresh_palette(&mut self) {
         let palette = match self.palette.refresh() {
             None => return,
-            Some(Ok(palette)) => palette,
+            Some(Ok(palette)) => {
+                self.palette_problem = None;
+                palette
+            }
             Some(Err(e)) => {
                 eprintln!("budctl-gui: {e}; using the built-in colors");
+                self.palette_problem = Some(e);
                 theme::BUILT_IN
             }
         };
@@ -916,6 +960,20 @@ impl App {
                 };
                 gestures::view(look, &self.buds, self.touch_draft.as_ref(), marks)
             }
+            Page::Earbuds if self.has_reading() => {
+                let marks = Marks {
+                    focus: self.focus(),
+                    pending: &pending,
+                };
+                earbuds::view(look, &self.buds, self.ringing, marks)
+            }
+            Page::Settings => {
+                let colors = settings::Colors {
+                    file: self.palette.file(),
+                    problem: self.palette_problem.as_deref(),
+                };
+                settings::view(look, colors)
+            }
             page => column![
                 ui::title(look, page.title()),
                 text("This page comes in a later step.").size(14).color(look.p.dim)
@@ -945,6 +1003,8 @@ impl App {
         let window = row![self.sidebar(), ui::divider(look), content];
         if self.help {
             stack![window, self.help()].into()
+        } else if self.confirm_find {
+            stack![window, self.confirm_find()].into()
         } else {
             window.into()
         }
@@ -1066,6 +1126,33 @@ impl App {
                 ..container::Style::default()
             })
             .into()
+    }
+
+    /// "Ring the buds?", over a dimmed window: the sound is loud enough to hurt in the ears.
+    fn confirm_find(&self) -> Element<'_, Message> {
+        let look = self.look;
+        let p = look.p;
+        let words = column![
+            text("Ring your buds?").size(22).font(look.bold()).color(p.fg),
+            text("Take them out of your ears first: the sound is loud. They ring until you press Stop.")
+                .size(14)
+                .color(p.dim),
+        ]
+        .spacing(8);
+        let buttons = row![
+            space::horizontal(),
+            ui::pill(look, "Cancel", false, Message::ConfirmFind(false)),
+            ui::pill(look, "Ring", true, Message::ConfirmFind(true)),
+        ]
+        .spacing(10);
+        let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
+        let backdrop = container(container(dialog).width(480))
+            .center(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
+                ..container::Style::default()
+            });
+        opaque(backdrop)
     }
 
     /// The list of keys, over a dimmed window. A key or a click closes it.
@@ -1528,6 +1615,40 @@ mod tests {
     }
 
     #[test]
+    fn ringing_needs_a_yes() {
+        let mut app = app();
+        press(&mut app, "4 j Enter");
+        assert_eq!(app.page, Page::Earbuds);
+        assert!(app.confirm_find);
+        press(&mut app, "Esc");
+        assert!(!app.confirm_find);
+        assert!(!app.ringing);
+        press(&mut app, "Enter j");
+        assert!(!app.ringing, "only Enter says yes");
+        press(&mut app, "Enter Enter");
+        assert!(app.ringing);
+        // Stopping asks nothing.
+        press(&mut app, "Enter");
+        assert!(!app.confirm_find);
+        assert!(!app.ringing);
+    }
+
+    #[test]
+    fn live_ringing_waits_for_the_buds() {
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::Find);
+        let _ = app.update(Message::ConfirmFind(true));
+        assert!(matches!(commands.try_recv(), Ok(Command::Find(true))));
+        assert!(!app.ringing);
+        let _ = app.update(Message::Worker(Event::Ringing(true)));
+        assert!(app.ringing);
+        let _ = app.update(Message::Find);
+        assert!(matches!(commands.try_recv(), Ok(Command::Find(false))));
+    }
+
+    #[test]
     fn steps() {
         let abc = ['a', 'b', 'c'];
         assert_eq!(step(&abc, Some(0), Action::Left), None);
@@ -1580,6 +1701,7 @@ mod tests {
         shots.push(("keys".to_owned(), 800.0, on(Page::Overview, "?")));
         shots.push(("equalizer-cursor".to_owned(), 1000.0, on(Page::Equalizer, "G G k k")));
         shots.push(("gestures-cursor".to_owned(), 1000.0, on(Page::Gestures, "j j")));
+        shots.push(("find-confirm".to_owned(), 800.0, on(Page::Earbuds, "j Enter")));
         let mut connecting = App::new(palette.clone(), font, None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));

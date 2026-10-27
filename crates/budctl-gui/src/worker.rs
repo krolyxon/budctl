@@ -44,6 +44,8 @@ pub enum Command {
     },
     /// Set the noise-control modes a hold steps through.
     HoldCycle(Vec<String>),
+    /// Start (`true`) or stop ringing the buds.
+    Find(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +68,8 @@ pub enum Event {
     Touch(Vec<Gesture>),
     /// The answer to [`Command::HoldCycle`]: the modes, as read back.
     HoldCycle(Vec<String>),
+    /// The answer to [`Command::Find`]: whether the buds were told to ring.
+    Ringing(bool),
     /// The answer to a command that failed. The session is closed; the next command opens a
     /// new one.
     Failed { kind: Kind, message: String },
@@ -203,6 +207,10 @@ impl Worker {
                 .session()
                 .and_then(|session| session.set_touch(&side, &gesture, &action, false))
                 .map(|change| Event::Touch(change.gestures)),
+            Command::Find(ring) => self
+                .session()
+                .and_then(|session| session.find(ring))
+                .map(|()| Event::Ringing(ring)),
             Command::HoldCycle(modes) => {
                 let modes: Vec<&str> = modes.iter().map(String::as_str).collect();
                 self.session()

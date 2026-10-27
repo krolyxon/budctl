@@ -145,6 +145,11 @@ impl Source {
         Source { file, stamp: None }
     }
 
+    /// The palette file followed, if any.
+    pub fn file(&self) -> Option<&Path> {
+        self.file.as_deref()
+    }
+
     /// The palette, if the file changed since the last call: built-in when the file is gone, an
     /// error when it cannot be used. `None` when nothing changed.
     pub fn refresh(&mut self) -> Option<Result<Palette, String>> {

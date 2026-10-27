@@ -235,6 +235,30 @@ pub fn nav_item<'a>(look: Look, icon: Icon, label: &'a str, open: bool, on_press
         .into()
 }
 
+/// A small rounded button: outlined, or `filled` with the accent.
+pub fn pill<'a>(look: Look, label: &'a str, filled: bool, on_press: Message) -> Element<'a, Message> {
+    let p = look.p;
+    let color = if filled { p.accent_fg } else { p.fg };
+    button(text(label).size(13.5).font(look.medium()).color(color))
+        .on_press(on_press)
+        .padding([7, 16])
+        .style(move |_, status| button::Style {
+            background: if filled {
+                Some(p.accent.into())
+            } else {
+                hovered(status).then_some(p.surface_high.into())
+            },
+            text_color: color,
+            border: Border {
+                color: if filled { p.accent } else { p.line },
+                width: 1.0,
+                radius: 999.0.into(),
+            },
+            ..button::Style::default()
+        })
+        .into()
+}
+
 /// A wide button with an outline, like "Disconnect".
 pub fn outline_button<'a>(look: Look, label: &'a str, on_press: Message) -> Element<'a, Message> {
     let p = look.p;
