@@ -21,6 +21,8 @@ pub(super) const NOISE_CONTROL: u16 = 0x010C;
 pub(super) const SWITCHES: u16 = 0x010D;
 /// Spec: realme_t310.md#anc-write
 pub(super) const NOISE_CONTROL_WRITE: u16 = 0x0404;
+/// Spec: realme_t310.md#switch-write
+pub(super) const SWITCH_WRITE: u16 = 0x0403;
 /// Spec: realme_t310.md#eq-read
 pub(super) const EQ_PRESET: u16 = 0x010F;
 /// Spec: realme_t310.md#codec
@@ -373,6 +375,16 @@ pub(super) fn decode_switches(reply: &[u8]) -> Result<Vec<Switch>> {
     Ok(switches)
 }
 
+/// The id of a switch, by its key (`game`…). Spec: realme_t310.md#switches
+pub(super) fn switch_id(key: &str) -> Option<u8> {
+    SWITCH_NAMES.iter().find(|(_, k, _)| *k == key).map(|(id, _, _)| *id)
+}
+
+/// `<id> <01|00>`. Spec: realme_t310.md#switch-write
+pub(super) fn switch_write_payload(id: u8, on: bool) -> [u8; 2] {
+    [id, u8::from(on)]
+}
+
 /// Spec: realme_t310.md#eq-read
 pub(super) fn decode_eq(reply: &[u8]) -> Result<String> {
     let id = ok_reply(reply, "the EQ reply")?.u8()?;
@@ -535,6 +547,15 @@ mod tests {
             crate::devices::realme_t310::frame::encode(NOISE_CONTROL_WRITE, 0x06, &noise_write_payload(NoiseMode::Off))
                 .unwrap();
         assert_eq!(frame, hex("AA 0A 00 00 04 04 06 03 00 01 01 01"));
+    }
+
+    #[test]
+    fn switch_writes() {
+        assert_eq!(switch_id("game"), Some(0x06));
+        assert_eq!(switch_id("dual"), Some(0x11));
+        assert_eq!(switch_id("turbo"), None);
+        assert_eq!(switch_write_payload(0x06, true), [0x06, 0x01]);
+        assert_eq!(switch_write_payload(0x06, false), [0x06, 0x00]);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use budctl_core::bluez::PairedDevice;
 use budctl_core::devices::Device;
-use budctl_core::status::{Charge, JSON_SCHEMA, NoiseControl, Status, TouchControls};
+use budctl_core::status::{Charge, JSON_SCHEMA, NoiseControl, Status, Switch, TouchControls};
 use budctl_core::{Error, Found};
 use serde_json::Value;
 
@@ -206,5 +206,26 @@ pub fn noise_control(
         Some(level) => writeln!(out, "  Noise control  {} ({level})", now.mode)?,
         None => writeln!(out, "  Noise control  {}", now.mode)?,
     }
+    Ok(())
+}
+
+/// One switch after a change, as the buds report it on reading back. JSON uses the same
+/// `switches` map as `status`.
+pub fn switch(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    now: &Switch,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(
+            out,
+            Some((device, model)),
+            serde_json::json!({ "switches": { now.key: now.on } }),
+        );
+    }
+    header(out, device, model)?;
+    writeln!(out, "  {}  {}", now.label, if now.on { "on" } else { "off" })?;
     Ok(())
 }

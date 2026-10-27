@@ -46,6 +46,17 @@ enum Command {
         #[arg(value_enum)]
         mode: AncArg,
     },
+    /// Turn game mode (low latency) on or off, then read it back.
+    Game {
+        #[arg(value_enum)]
+        state: OnOff,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum OnOff {
+    On,
+    Off,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -124,6 +135,10 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         Command::Anc { mode } => {
             let now = session.set_noise_control(mode.into())?;
             output::noise_control(out, &device, model, &now, cli.json)
+        }
+        Command::Game { state } => {
+            let now = session.set_switch("game", matches!(state, OnOff::On))?;
+            output::switch(out, &device, model, &now, cli.json)
         }
     }
 }

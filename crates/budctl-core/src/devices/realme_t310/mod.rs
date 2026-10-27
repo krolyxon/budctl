@@ -9,7 +9,7 @@ use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
-use crate::status::{NoiseControl, NoiseMode, Status, TouchControls};
+use crate::status::{NoiseControl, NoiseMode, Status, Switch, TouchControls};
 use crate::transport::Transport;
 
 mod codec;
@@ -19,11 +19,35 @@ mod link;
 use codec::Commands;
 use link::Link;
 
-/// After a write is acked: how long to keep reading back, and the pause between reads.
+/// When to read a setting back after the buds ack a write. Spec: realme_t310.md#write-read-back
+#[derive(Clone, Copy)]
+struct ReadBack {
+    /// How long after the ack the first read goes out.
+    first: Duration,
+    /// How long after the ack budctl gives up.
+    window: Duration,
+}
+
 /// Spec: realme_t310.md#write-read-back
-const READ_BACK_WINDOW: Duration = Duration::from_secs(2);
+const READ_BACK: ReadBack = ReadBack {
+    first: Duration::ZERO,
+    window: Duration::from_secs(2),
+};
+/// Game mode lands about 1 s after the ack. Spec: realme_t310.md#switch-write
+const GAME_READ_BACK: ReadBack = ReadBack {
+    first: Duration::from_secs(1),
+    window: Duration::from_secs(3),
+};
 /// Spec: realme_t310.md#write-read-back
 const READ_BACK_PAUSE: Duration = Duration::from_millis(300);
+
+/// The switches budctl may write, each added after the previous one passed its hardware
+/// checkpoint (CLAUDE.md rule 4). Spec: realme_t310.md#switch-write
+const WRITABLE_SWITCHES: [(&str, ReadBack); 1] = [("game", GAME_READ_BACK)];
+
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
 
 /// Spec: realme_t310.md#identity
 const BLUETOOTH_NAME: &str = "realme Buds T310";
@@ -132,6 +156,34 @@ impl T310Session {
     }
 }
 
+impl T310Session {
+    /// After an acked write, read the setting back with `cmd query` until `check` reports the
+    /// new value, following `timing`. `check` returns whether the value is the one written,
+    /// and the value; `not_applied` describes a value that never changed.
+    /// Spec: realme_t310.md#write-read-back
+    fn read_back<T>(
+        &mut self,
+        timing: ReadBack,
+        cmd: u16,
+        query: &[u8],
+        check: impl Fn(&[u8]) -> Result<(bool, T)>,
+        not_applied: impl Fn(T) -> String,
+    ) -> Result<T> {
+        let acked = Instant::now();
+        self.link.pump_until(acked + timing.first)?;
+        loop {
+            let (applied, value) = check(&self.link.request(cmd, query)?)?;
+            if applied {
+                return Ok(value);
+            }
+            if Instant::now() >= acked + timing.window {
+                return Err(Error::NotApplied(not_applied(value)));
+            }
+            self.link.pump_until(Instant::now() + READ_BACK_PAUSE)?;
+        }
+    }
+}
+
 impl Session for T310Session {
     fn status(&mut self) -> Result<Status> {
         let mut reads = Reads::default();
@@ -183,16 +235,18 @@ impl Session for T310Session {
             .request(codec::NOISE_CONTROL_WRITE, &codec::noise_write_payload(mode))?;
         codec::check_write_reply(&reply, "the noise-control change")?;
 
-        // Accepted is not applied: read back until the new mode shows, or give up.
         let wanted = codec::noise_write_mask(mode);
-        let give_up = Instant::now() + READ_BACK_WINDOW;
-        loop {
-            let reply = self.link.request(codec::NOISE_CONTROL, &codec::NOISE_MODE_QUERY)?;
-            if codec::decode_noise_mask(&reply)? == wanted {
-                return codec::decode_noise_mode(&reply);
-            }
-            if Instant::now() >= give_up {
-                let now = codec::decode_noise_mode(&reply)?;
+        self.read_back(
+            READ_BACK,
+            codec::NOISE_CONTROL,
+            &codec::NOISE_MODE_QUERY,
+            |reply| {
+                Ok((
+                    codec::decode_noise_mask(reply)? == wanted,
+                    codec::decode_noise_mode(reply)?,
+                ))
+            },
+            |now| {
                 let wanted = match mode {
                     NoiseMode::Anc(level) => format!("anc ({})", level.name()),
                     _ => mode.name().to_owned(),
@@ -201,12 +255,47 @@ impl Session for T310Session {
                     Some(level) => format!("{} ({level})", now.mode),
                     None => now.mode,
                 };
-                return Err(Error::NotApplied(format!(
-                    "the buds accepted noise control {wanted}, but still report {reported}"
-                )));
-            }
-            self.link.pump_until(Instant::now() + READ_BACK_PAUSE)?;
+                format!("the buds accepted noise control {wanted}, but still report {reported}")
+            },
+        )
+    }
+
+    /// Spec: realme_t310.md#switch-write, #write-read-back
+    fn set_switch(&mut self, key: &str, on: bool) -> Result<Switch> {
+        let Some(id) = codec::switch_id(key) else {
+            return Err(Error::Unsupported(format!("these buds have no switch called {key}")));
+        };
+        let Some(&(_, timing)) = WRITABLE_SWITCHES.iter().find(|(k, _)| *k == key) else {
+            return Err(Error::Unsupported(format!("budctl cannot change {key} yet")));
+        };
+        if !self.commands.allows(codec::SWITCH_WRITE) || !self.commands.allows(codec::SWITCHES) {
+            return Err(Error::Unsupported("these buds do not offer switch settings".to_owned()));
         }
+        let reply = self
+            .link
+            .request(codec::SWITCH_WRITE, &codec::switch_write_payload(id, on))?;
+        codec::check_write_reply(&reply, "the switch change")?;
+
+        self.read_back(
+            timing,
+            codec::SWITCHES,
+            &codec::SWITCH_QUERY,
+            |reply| {
+                let switch = codec::decode_switches(reply)?
+                    .into_iter()
+                    .find(|s| s.key == key)
+                    .ok_or_else(|| Error::Protocol(format!("the switch reply has no {key}")))?;
+                Ok((switch.on == on, switch))
+            },
+            |now| {
+                format!(
+                    "the buds accepted {} {}, but still report {}",
+                    now.label,
+                    on_off(on),
+                    on_off(now.on)
+                )
+            },
+        )
     }
 
     fn touch_controls(&mut self) -> Result<TouchControls> {
@@ -532,5 +621,50 @@ mod tests {
         let result = open(&script).unwrap().set_noise_control(NoiseMode::Off);
         script.assert_done();
         assert!(matches!(result, Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn sets_game_mode_and_reads_it_back() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0403, 0x05, "06 01"),
+            rx(0x8403, 0x05, "00"),
+            // Still the old value: budctl reads again.
+            tx(0x010D, 0x06, "06 05 06 11 1A 1B 1D"),
+            rx(0x810D, 0x06, "00 06 05 00 06 00 11 00 1A 01 1B 00 1D 00"),
+            tx(0x010D, 0x07, "06 05 06 11 1A 1B 1D"),
+            rx(0x810D, 0x07, "00 06 05 00 06 01 11 00 1A 01 1B 00 1D 00"),
+        ]);
+        let script = Script::new(steps);
+        let game = open(&script).unwrap().set_switch("game", true).unwrap();
+        script.assert_done();
+        assert_eq!((game.key, game.on), ("game", true));
+    }
+
+    #[test]
+    fn switches_not_yet_verified_are_never_written() {
+        // Nothing is sent after the handshake, so the subscribe ack is left out.
+        let mut steps = handshake();
+        steps.pop();
+        let script = Script::new(steps);
+        let mut session = open(&script).unwrap();
+        for key in ["dual", "wind", "spatial", "bass-boost"] {
+            assert!(
+                matches!(session.set_switch(key, true), Err(Error::Unsupported(_))),
+                "{key}"
+            );
+        }
+        assert!(matches!(session.set_switch("turbo", true), Err(Error::Unsupported(_))));
+        script.assert_done();
+    }
+
+    #[test]
+    fn a_switch_the_buds_lack_is_rejected() {
+        let mut steps = handshake();
+        steps.extend([tx(0x0403, 0x05, "06 00"), rx(0x8403, 0x05, "01")]);
+        let script = Script::new(steps);
+        let result = open(&script).unwrap().set_switch("game", false);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Rejected { status: 0x01, .. })));
     }
 }

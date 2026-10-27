@@ -361,7 +361,7 @@ Evidence: *vendor*
 <a id="writes"></a>
 ## 10. Writes
 
-**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), and the light/medium/deep levels (W2, verified *ours-2026-10-27*). The others are not sent yet.
+**One at a time.** budctl adds a write only after the previous one passes its hardware checkpoint (see the [roadmap](#roadmap)). Sent so far: [§10.1](#anc-write) off/transparency/on (W1, verified *ours-2026-10-27*), the light/medium/deep levels (W2, verified *ours-2026-10-27*), and [§10.2](#switch-write) game mode (W3, verified *ours-2026-10-27*). The others are not sent yet.
 
 **General rule**:
 - A write reply is `0x84xx <status …>`, and `00` means accepted.
@@ -387,7 +387,8 @@ Evidence: *vendor*
   - `01` the buds lack this id
   - `02` or anything else: refused for now
 - **Check:** read `0x010D` again.
-- **Game mode on the T310.** The buds never push the new value (*t310*). On Buds 4 the change lands about 1 s after the ack, and a read sooner still returns the old value (*buds4*). So budctl reads back after about 1 s, and again up to 3 s later.
+- **Game mode on the T310.** The buds never push the new value (*t310*). On Buds 4 the change lands about 1 s after the ack, and a read sooner still returns the old value (*buds4*). So budctl reads back 1 s after the ack, then every 300 ms until 3 s after the ack.
+- **Game mode on the owner's T310** (*ours-2026-10-27*, W3): `0x0403 06 01` and `06 00` were acked with `00` within 13 ms. The read 1 s later already showed the new value. No push came, and the buds played no prompt.
 - **Dual connection.** Other clients also send `0x0413` afterwards. The T310's bitmap lacks it, so budctl sends only `0x0403 11`. Turning dual connection off may drop the link to one host, so it is tested last.
 
 <a id="eq-write"></a>
@@ -472,7 +473,7 @@ Evidence: *vendor*
 4. What "busy" looks like when the phone holds the channel: the connect is refused, the connect succeeds and the buds stay silent, or the buds drop the laptop's link. A local holder gives `EBUSY` (HW1). Until the phone case is tested, budctl also treats a silent handshake as "channel busy" (exit 3).
 5. The width of the noise-control value: one byte so far, on reads and writes. `08` is the deep level: light, medium and deep read back as `04`, `10` and `08` (W2).
 6. ~~Whether the T310 answers id `1A` (wind).~~ It does (HW1). What id `05` means is still open: it reads `00`.
-7. How long after the game-mode ack the new value shows up in `0x010D`.
+7. How long after the game-mode ack the new value shows up in `0x010D`: at most 1 s on the T310 (W3). Whether it is sooner was not measured.
 8. The shape of the T310 gesture table is answered at HW1: six entries, `<side> <group> <act> <fn>`, double tap, triple tap and hold for each bud. The names of the EQ presets in realme Link are still open.
 9. Whether the minimum 200 ms spacing between sends is needed.
 10. Why the T310 ignores `0x0124` although bit 38 is set ([§9.7](#bass-read)). Needs a realme Link capture before W6.
@@ -510,6 +511,7 @@ Ask for an Android HCI snoop of realme Link before W11, and for any write that d
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W3 `game on`, `game off` | pass | Acked, and the 1 s read-back showed the change. No push or prompt. See [§10.2](#switch-write) |
 | 2026-10-27 | W2 `anc light`, `anc medium`, `anc deep`; level memory | pass | Each level acked and read back on the first try. The buds keep the level across a hold-gesture cycle. See [§10.1](#anc-write) |
 | 2026-10-27 | W1 `anc transparency`, `anc off`, `anc on` | pass | Acked, read back on the first try, and the buds' voice prompts matched. See [§10.1](#anc-write) |
 | 2026-10-27 | HW1 `list`, `status`, `--json status`, `touch`, not-connected path, busy path (local holder) | pass, with fixes | See below. Busy with the phone app as the holder is still untested |

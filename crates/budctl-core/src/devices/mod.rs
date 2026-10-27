@@ -6,7 +6,7 @@
 use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
-use crate::status::{NoiseControl, NoiseMode, Status, TouchControls};
+use crate::status::{NoiseControl, NoiseMode, Status, Switch, TouchControls};
 use crate::transport::Transport;
 
 pub mod realme_t310;
@@ -46,6 +46,11 @@ pub trait Session: Send {
         Err(Error::Unsupported(
             "these buds have no noise-control setting budctl can change".to_owned(),
         ))
+    }
+
+    /// Turn an on/off setting ([`Switch::key`]) on or off, then read it back.
+    fn set_switch(&mut self, key: &str, _on: bool) -> Result<Switch> {
+        Err(Error::Unsupported(format!("budctl cannot change {key} on these buds")))
     }
 }
 
