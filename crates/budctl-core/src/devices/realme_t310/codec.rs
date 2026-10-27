@@ -56,6 +56,10 @@ pub(super) const EQ_PRESET: u16 = 0x010F;
 pub(super) const CODEC: u16 = 0x0114;
 /// Spec: realme_t310.md#custom-eq
 pub(super) const CUSTOM_EQ_LIST: u16 = 0x0122;
+/// Spec: realme_t310.md#custom-eq
+pub(super) const CUSTOM_EQ_WRITE: u16 = 0x0418;
+/// The `0x0418` action that saves a whole preset and selects it. Spec: realme_t310.md#custom-eq
+const CUSTOM_EQ_SAVE: u8 = 0x02;
 /// Spec: realme_t310.md#events-offered
 pub(super) const EVENTS_OFFERED: u16 = 0x0200;
 /// Spec: realme_t310.md#subscribe
@@ -482,16 +486,40 @@ pub(super) fn builtin_eqs() -> Vec<EqPreset> {
         .collect()
 }
 
+/// One custom preset as the list holds it. Spec: realme_t310.md#custom-eq
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CustomEq {
+    pub(super) selected: bool,
+    /// Gain range, dB.
+    pub(super) min: i8,
+    pub(super) max: i8,
+    pub(super) id: u8,
+    /// The stored name, byte for byte, so a save writes it back unchanged.
+    pub(super) name: Vec<u8>,
+    pub(super) bands: Vec<EqBand>,
+}
+
+impl CustomEq {
+    pub(super) fn preset(&self) -> EqPreset {
+        EqPreset {
+            name: String::from_utf8_lossy(&self.name).into_owned(),
+            id: self.id,
+            custom: true,
+            bands: self.bands.clone(),
+        }
+    }
+}
+
 /// `00 <count>`, then per preset `<selected> <min> <max> <id> <nameLen> <name> <bands>
 /// (<freq u16 LE> <gain s8>)…`. Spec: realme_t310.md#custom-eq
-pub(super) fn decode_custom_eqs(reply: &[u8]) -> Result<Vec<EqPreset>> {
+pub(super) fn decode_custom_eq_list(reply: &[u8]) -> Result<Vec<CustomEq>> {
     let mut r = ok_reply(reply, "the custom EQ list")?;
     let mut presets = Vec::new();
     for _ in 0..r.u8()? {
-        let (_selected, _min, _max) = (r.u8()?, r.i8()?, r.i8()?);
-        let id = r.u8()?;
+        let selected = r.u8()? == 0x01;
+        let (min, max, id) = (r.i8()?, r.i8()?, r.u8()?);
         let name_len = r.u8()?;
-        let name = String::from_utf8_lossy(r.take(usize::from(name_len))?).into_owned();
+        let name = r.take(usize::from(name_len))?.to_vec();
         let mut bands = Vec::new();
         for _ in 0..r.u8()? {
             bands.push(EqBand {
@@ -499,14 +527,72 @@ pub(super) fn decode_custom_eqs(reply: &[u8]) -> Result<Vec<EqPreset>> {
                 gain: r.i8()?,
             });
         }
-        presets.push(EqPreset {
-            name,
+        presets.push(CustomEq {
+            selected,
+            min,
+            max,
             id,
-            custom: true,
+            name,
             bands,
         });
     }
     Ok(presets)
+}
+
+/// Spec: realme_t310.md#custom-eq
+pub(super) fn decode_custom_eqs(reply: &[u8]) -> Result<Vec<EqPreset>> {
+    Ok(decode_custom_eq_list(reply)?.iter().map(CustomEq::preset).collect())
+}
+
+/// The id in `custom-<id>`, the name [`decode_eq`] gives a custom preset.
+/// Spec: realme_t310.md#eq-read
+pub(super) fn custom_eq_id(name: &str) -> Option<u8> {
+    name.strip_prefix("custom-")?.parse().ok()
+}
+
+/// The preset with the given bands' gains changed, and nothing else. Every band must be one the
+/// preset has, at most once, with a gain inside the preset's range.
+/// Spec: realme_t310.md#custom-eq
+pub(super) fn retune(preset: &CustomEq, changes: &[EqBand]) -> Result<CustomEq> {
+    let mut tuned = preset.clone();
+    for (i, change) in changes.iter().enumerate() {
+        if changes.iter().take(i).any(|earlier| earlier.hz == change.hz) {
+            return Err(Error::Usage(format!("the {} Hz band is given twice", change.hz)));
+        }
+        let Some(band) = tuned.bands.iter_mut().find(|b| b.hz == change.hz) else {
+            let have: Vec<String> = preset.bands.iter().map(|b| b.hz.to_string()).collect();
+            return Err(Error::Usage(format!(
+                "custom-{} has no {} Hz band; its bands are {} Hz",
+                preset.id,
+                change.hz,
+                have.join(", ")
+            )));
+        };
+        if !(preset.min..=preset.max).contains(&change.gain) {
+            return Err(Error::Usage(format!(
+                "a gain of {:+} dB is outside {:+}..{:+} dB",
+                change.gain, preset.min, preset.max
+            )));
+        }
+        band.gain = change.gain;
+    }
+    Ok(tuned)
+}
+
+/// `02 <min> <max> <id> <nameLen> <name> <bands> (<freq u16 LE> <gain s8>)…`: save the whole
+/// preset and select it. Spec: realme_t310.md#custom-eq
+pub(super) fn custom_eq_save_payload(preset: &CustomEq) -> Result<Vec<u8>> {
+    let too_long = |what: &str| Error::Protocol(format!("the preset's {what} does not fit in a byte"));
+    let mut payload = vec![CUSTOM_EQ_SAVE];
+    payload.extend([preset.min.to_le_bytes()[0], preset.max.to_le_bytes()[0], preset.id]);
+    payload.push(u8::try_from(preset.name.len()).map_err(|_| too_long("name"))?);
+    payload.extend(&preset.name);
+    payload.push(u8::try_from(preset.bands.len()).map_err(|_| too_long("band count"))?);
+    for band in &preset.bands {
+        payload.extend(band.hz.to_le_bytes());
+        payload.push(band.gain.to_le_bytes()[0]);
+    }
+    Ok(payload)
 }
 
 /// One gesture-table entry: `<dev> <btn> <act> <fn>`. Spec: realme_t310.md#gestures
@@ -977,5 +1063,44 @@ mod tests {
         let frame = crate::devices::realme_t310::frame::encode(BASS_LEVEL_WRITE, 0x05, &bass_write_payload(3).unwrap())
             .unwrap();
         assert_eq!(crate::debug::hex(&frame), "AA 0A 00 00 1B 04 05 03 00 FB 05 03");
+    }
+
+    /// The owner's custom EQ list (W11a): "Custom1", id 04, 6 flat bands from 50 Hz.
+    const OWNER_CUSTOM_EQS: &str =
+        "00 01 01 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+
+    #[test]
+    fn retunes_the_owners_custom_preset() {
+        let list = decode_custom_eq_list(&hex(OWNER_CUSTOM_EQS)).unwrap();
+        let custom1 = list.first().unwrap();
+        assert!(custom1.selected);
+        assert_eq!((custom1.min, custom1.max, custom1.id), (-6, 6, 4));
+        assert_eq!(custom_eq_id("custom-4"), Some(4));
+        assert_eq!(custom_eq_id("pure-bass"), None);
+        assert_eq!(custom_eq_id("custom-x"), None);
+
+        // Unchanged, the save carries the preset as listed.
+        assert_eq!(
+            custom_eq_save_payload(&retune(custom1, &[]).unwrap()).unwrap(),
+            hex("02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00")
+        );
+        let tuned = retune(custom1, &[EqBand { hz: 50, gain: 3 }, EqBand { hz: 16000, gain: -2 }]).unwrap();
+        let payload = custom_eq_save_payload(&tuned).unwrap();
+        assert_eq!(
+            payload,
+            hex("02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 03 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E FE")
+        );
+        // The frame the spec gives (realme_t310.md#custom-eq).
+        let frame = crate::devices::realme_t310::frame::encode(CUSTOM_EQ_WRITE, 0x06, &payload).unwrap();
+        assert_eq!(
+            crate::debug::hex(&frame),
+            "AA 26 00 00 18 04 06 1F 00 02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 03 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E FE"
+        );
+
+        let usage = |changes: &[EqBand]| matches!(retune(custom1, changes), Err(Error::Usage(_)));
+        assert!(usage(&[EqBand { hz: 62, gain: 1 }]));
+        assert!(usage(&[EqBand { hz: 50, gain: 7 }]));
+        assert!(usage(&[EqBand { hz: 50, gain: -7 }]));
+        assert!(usage(&[EqBand { hz: 50, gain: 1 }, EqBand { hz: 50, gain: 2 }]));
     }
 }

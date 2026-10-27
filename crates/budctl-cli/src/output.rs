@@ -4,7 +4,9 @@ use std::io::{self, Write};
 
 use budctl_core::bluez::PairedDevice;
 use budctl_core::devices::Device;
-use budctl_core::status::{Charge, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls};
+use budctl_core::status::{
+    Charge, EqPreset, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls,
+};
 use budctl_core::{Error, Found};
 use serde_json::Value;
 
@@ -316,6 +318,27 @@ pub fn eq_presets(
         writeln!(out, "  {mark} {name} \"{}\": {}", preset.name, bands.join(", "))?;
     }
     warnings(out, &eq.warnings)?;
+    Ok(())
+}
+
+/// One custom preset after it was saved and selected, as the buds list it on reading back.
+pub fn custom_eq(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    now: &EqPreset,
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(
+            out,
+            Some((device, model)),
+            serde_json::json!({ "eq": format!("custom-{}", now.id), "preset": now }),
+        );
+    }
+    header(out, device, model)?;
+    let bands: Vec<String> = now.bands.iter().map(|b| format!("{} Hz {:+}", b.hz, b.gain)).collect();
+    writeln!(out, "  EQ  custom-{} \"{}\": {}", now.id, now.name, bands.join(", "))?;
     Ok(())
 }
 

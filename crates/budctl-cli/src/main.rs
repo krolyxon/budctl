@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 use budctl_core::bt::BdAddr;
-use budctl_core::status::{AncLevel, NoiseMode};
+use budctl_core::status::{AncLevel, EqBand, NoiseMode};
 use budctl_core::{Error, Kind};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -65,8 +65,16 @@ enum Command {
         #[arg(value_enum)]
         mode: AncArg,
     },
-    /// List the EQ presets, or select one (pure-raw, deep-bass, pure-vocals, pure-bass) and read it back.
-    Eq { preset: Option<String> },
+    /// List the EQ presets, or select one (pure-raw, deep-bass, pure-vocals, pure-bass, custom-<id>) and read it back.
+    ///
+    /// For a custom preset, `<hz>=<gain>` pairs change those bands' gains (dB), then save and
+    /// select it: `budctl eq custom-4 50=+3 16000=-2`.
+    Eq {
+        preset: Option<String>,
+        /// Bands to change, as `<hz>=<gain>`. Custom presets only.
+        #[arg(requires = "preset", value_parser = parse_band, allow_negative_numbers = true)]
+        bands: Vec<EqBand>,
+    },
     /// Turn an on/off setting on or off, then read it back. Switches: game, bass-boost, spatial (3D sound), wind, dual.
     Set {
         /// The switch's name, as `status --json` lists it.
@@ -260,12 +268,20 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let now = session.set_noise_control(mode.into())?;
             output::noise_control(out, &device, model, &now, cli.json)
         }
-        Command::Eq { preset: None } => {
+        Command::Eq { preset: None, .. } => {
             let presets = session.eq_presets()?;
             output::eq_presets(out, &device, model, &presets, cli.json)
         }
         Command::Eq {
             preset: Some(ref preset),
+            ref bands,
+        } if !bands.is_empty() => {
+            let now = session.set_custom_eq(preset, bands)?;
+            output::custom_eq(out, &device, model, &now, cli.json)
+        }
+        Command::Eq {
+            preset: Some(ref preset),
+            ..
         } => {
             let now = session.set_eq(preset)?;
             output::eq(out, &device, model, &now, cli.json)
@@ -288,6 +304,17 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             output::switch(out, &device, model, &now, cli.json)
         }
     }
+}
+
+/// `50=+3` → 50 Hz at +3 dB.
+fn parse_band(text: &str) -> Result<EqBand, String> {
+    let (hz, gain) = text
+        .split_once('=')
+        .ok_or_else(|| format!("{text} is not <hz>=<gain>, e.g. 50=+3"))?;
+    Ok(EqBand {
+        hz: hz.parse().map_err(|_| format!("{hz} is not a frequency in Hz"))?,
+        gain: gain.parse().map_err(|_| format!("{gain} is not a gain in whole dB"))?,
+    })
 }
 
 /// Exit codes from CLAUDE.md: 1 usage, 2 not found, 3 busy, 4 rejected or timed out.

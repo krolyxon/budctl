@@ -496,7 +496,14 @@ Evidence: *vendor*
   - **The lowest band is 50 Hz, not 62.** The vendor default above does not hold on the T310; use the bands the buds report.
   - **The preset was already there** when budctl first read it. Its origin is unknown: it may be the factory state, or left over from realme Link.
   - **It was in use:** `0x010F` answered `00 04` at the same time, so `custom-4` is a valid current EQ, and the list's `selected` byte (`01`) agrees.
-- **What budctl does** (W11, one step per checkpoint, no app capture): `budctl eq` with no preset reads `0x010F` and the list (W11a, read-only). A custom preset shows as `custom-<id>`, the name `0x010F` decoding uses, followed by its stored name and bands. Create, save and delete follow one at a time.
+- **What budctl does** (W11, one step per checkpoint, no app capture):
+  - **W11a** (read-only): `budctl eq` with no preset reads `0x010F` and the list. A custom preset shows as `custom-<id>`, the name `0x010F` decoding uses, followed by its stored name and bands.
+  - <a id="custom-eq-save"></a>**W11b, save** (`02`): `budctl eq custom-<id> <hz>=<gain>…` reads the list and copies the preset as listed: range bytes, id, name bytes, and the bands and their order. It changes only the gains of the named bands. A band the preset lacks, a band named twice, or a gain outside the preset's range is refused before anything is sent. `budctl eq custom-<id>` with no bands sends the preset unchanged, which only selects it. budctl never selects a custom preset with `0x0406`, since this spec does not say that works.
+  - **Check:** read the list again, as for [read-back](#write-read-back). The preset must have the written bands and its `selected` byte set.
+  - **Expected frame** (*derived*), for `eq custom-4 50=+3 16000=-2` on the owner's list, with seq `06`: `AA 26 00 00 18 04 06 1F 00 02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 03 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E FE`.
+  - **On the owner's T310** (*ours-2026-10-27*, W11b): that frame went out byte for byte. The buds answered `0x8418 00 04` within 53 ms, and the list read about 150 ms after the ack already had +3 dB at 50 Hz, -2 dB at 16000 Hz, the name unchanged and `selected` `01`. Writing the flat bands back worked the same way.
+  - **Not shown yet:** that `02` selects a preset that was not in use. `custom-4` was already the current EQ in every W11b run.
+  - Create (`01`) and delete (`03`) come later, if they are wanted at all: with one preset already on the buds, editing it gives a custom EQ without them.
 
 <a id="absent"></a>
 ## 11. Not on the T310
@@ -543,7 +550,7 @@ The owner runs each checkpoint with `--debug` and pastes the output. Results go 
 | W8 | `touch <side> <gesture> <action>` (`--dry-run` first) |
 | W9 | `touch cycle` |
 | W10 | ~~`fit-test`~~: dropped, the T310 runs no test ([§10.8](#fit-test)) |
-| W11 | W11a: `eq` lists the custom presets (read-only); then create, save and delete, one checkpoint each |
+| W11 | W11a: `eq` lists the custom presets (read-only); W11b: save an edited preset (`eq custom-<id> <hz>=<gain>…`); create and delete only if wanted |
 
 The owner will not install realme Link (2026-10-27), so there is no app capture. W6 and W11 use only the vendor-documented bytes in this spec, one checkpoint at a time.
 
@@ -552,6 +559,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-27 | W11b `eq custom-4`, `eq custom-4 50=+3 16000=-2`, then `50=0 16000=0` | pass (protocol) | The write matched the derived frame, was acked with `00 04` and read back on the first try. The preset is flat again. Selecting a custom preset that was not in use is untested. See [§10.9](#custom-eq-save) |
 | 2026-10-27 | W6b `bass -5`, `bass 5`, `bass 0` (bass boost off) | pass (protocol) | All acked with `0x841B 00`. No read-back is possible. By ear, at most a slight difference. See [§10.4](#bass-write) |
 | 2026-10-27 | W11a `eq` (custom list `0x0122`) | pass | One preset, "Custom1" (id `04`, 6 flat bands from 50 Hz), and it is the EQ in use. See [§10.9](#custom-eq) |
 | 2026-10-27 | W6a `status` with bass boost on (`0x0124`) | fail: no reply | Still no answer in 3 s. budctl does not send it. See [§9.7](#bass-read) |

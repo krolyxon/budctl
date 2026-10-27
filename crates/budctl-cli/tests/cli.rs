@@ -74,3 +74,17 @@ fn bass_needs_a_level_from_minus_5_to_5() {
         assert_eq!(out.status.code(), Some(1), "{args:?}");
     }
 }
+
+#[test]
+fn eq_bands_must_be_hz_equals_gain() {
+    for args in [
+        &["eq", "custom-4", "50"][..],
+        &["eq", "custom-4", "fifty=3"],
+        &["eq", "custom-4", "50=loud"],
+        &["eq", "custom-4", "50=+3.5"],
+        &["eq", "custom-4", "50=300"],
+    ] {
+        let out = budctl(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+    }
+}

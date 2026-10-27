@@ -10,7 +10,8 @@ use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
 use crate::status::{
-    EqPresets, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange, TouchControls,
+    EqBand, EqPreset, EqPresets, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange,
+    TouchControls,
 };
 use crate::transport::Transport;
 
@@ -295,9 +296,12 @@ impl Session for T310Session {
 
     /// Built-in presets only; custom EQs come with W11. Spec: realme_t310.md#eq-write
     fn set_eq(&mut self, preset: &str) -> Result<String> {
+        if codec::custom_eq_id(preset).is_some() {
+            return self.set_custom_eq(preset, &[]).map(|now| format!("custom-{}", now.id));
+        }
         let Some(id) = codec::eq_id(preset) else {
             return Err(Error::Usage(format!(
-                "no EQ preset called {preset}; these buds have: {}",
+                "no EQ preset called {preset}; these buds have: {}, and the custom-<id> ones `budctl eq` lists",
                 codec::eq_names().join(", ")
             )));
         };
@@ -317,6 +321,56 @@ impl Session for T310Session {
             },
             |now| format!("the buds accepted EQ {preset}, but still report {now}"),
         )
+    }
+
+    /// Spec: realme_t310.md#custom-eq, #write-read-back
+    fn set_custom_eq(&mut self, preset: &str, bands: &[EqBand]) -> Result<EqPreset> {
+        let Some(id) = codec::custom_eq_id(preset) else {
+            return Err(Error::Usage(format!(
+                "{preset} is not a custom preset; those are named custom-<id>, as `budctl eq` lists them"
+            )));
+        };
+        if !self.commands.allows(codec::CUSTOM_EQ_WRITE) || !self.commands.allows(codec::CUSTOM_EQ_LIST) {
+            return Err(Error::Unsupported(
+                "these buds do not offer custom EQ presets".to_owned(),
+            ));
+        }
+        // A save carries the whole preset, so it starts from the list read just now.
+        let list = codec::decode_custom_eq_list(&self.link.request(codec::CUSTOM_EQ_LIST, &[])?)?;
+        let Some(current) = list.iter().find(|p| p.id == id) else {
+            let have: Vec<String> = list.iter().map(|p| format!("custom-{}", p.id)).collect();
+            return Err(Error::Usage(format!(
+                "these buds have no {preset}; their custom presets: {}",
+                if have.is_empty() {
+                    "none".to_owned()
+                } else {
+                    have.join(", ")
+                }
+            )));
+        };
+        let wanted = codec::retune(current, bands)?;
+        let reply = self
+            .link
+            .request(codec::CUSTOM_EQ_WRITE, &codec::custom_eq_save_payload(&wanted)?)?;
+        codec::check_write_reply(&reply, "saving the custom EQ")?;
+
+        let now = self.read_back(
+            READ_BACK,
+            codec::CUSTOM_EQ_LIST,
+            &[],
+            |reply| {
+                let now = codec::decode_custom_eq_list(reply)?.into_iter().find(|p| p.id == id);
+                let applied = now.as_ref().is_some_and(|p| p.bands == wanted.bands && p.selected);
+                Ok((applied, now))
+            },
+            |now| match now {
+                None => format!("the buds accepted {preset}, but their list no longer has it"),
+                Some(p) if p.bands == wanted.bands => format!("the buds saved {preset}, but did not select it"),
+                Some(_) => format!("the buds accepted {preset}, but still report the old bands"),
+            },
+        )?;
+        now.map(|p| p.preset())
+            .ok_or_else(|| Error::Protocol(format!("{preset} vanished from the list")))
     }
 
     /// Ack-only: the T310 never answers the bass-level read. Spec: realme_t310.md#bass-write
@@ -1097,5 +1151,65 @@ mod tests {
         let result = open(&script).unwrap().set_bass_level(6);
         script.assert_done();
         assert!(matches!(result, Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn retunes_a_custom_preset_and_reads_it_back() {
+        let tuned =
+            "00 01 01 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 03 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0122, 0x05, ""),
+            rx(0x8122, 0x05, OWNER_CUSTOM_EQS),
+            tx(
+                0x0418,
+                0x06,
+                "02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 03 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00",
+            ),
+            rx(0x8418, 0x06, "00 04"),
+            tx(0x0122, 0x07, ""),
+            rx(0x8122, 0x07, tuned),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script)
+            .unwrap()
+            .set_custom_eq("custom-4", &[EqBand { hz: 50, gain: 3 }])
+            .unwrap();
+        script.assert_done();
+        assert_eq!((now.name.as_str(), now.id), ("Custom1", 4));
+        assert_eq!(now.bands.first(), Some(&EqBand { hz: 50, gain: 3 }));
+    }
+
+    #[test]
+    fn eq_custom_selects_by_saving_the_preset_unchanged() {
+        let saved = "02 FA 06 04 07 43 75 73 74 6F 6D 31 06 32 00 00 FA 00 00 E8 03 00 A0 0F 00 40 1F 00 80 3E 00";
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0122, 0x05, ""),
+            rx(0x8122, 0x05, OWNER_CUSTOM_EQS),
+            tx(0x0418, 0x06, saved),
+            rx(0x8418, 0x06, "00 04"),
+            tx(0x0122, 0x07, ""),
+            rx(0x8122, 0x07, OWNER_CUSTOM_EQS),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script).unwrap().set_eq("custom-4").unwrap();
+        script.assert_done();
+        assert_eq!(now, "custom-4");
+    }
+
+    #[test]
+    fn a_custom_preset_the_buds_lack_is_never_written() {
+        let mut steps = handshake();
+        steps.extend([tx(0x0122, 0x05, ""), rx(0x8122, 0x05, OWNER_CUSTOM_EQS)]);
+        let script = Script::new(steps);
+        let result = open(&script)
+            .unwrap()
+            .set_custom_eq("custom-5", &[EqBand { hz: 50, gain: 3 }]);
+        script.assert_done();
+        match result {
+            Err(Error::Usage(message)) => assert!(message.ends_with("custom-4")),
+            other => panic!("expected a usage error, got {other:?}"),
+        }
     }
 }

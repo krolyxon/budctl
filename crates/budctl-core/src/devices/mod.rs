@@ -6,7 +6,7 @@
 use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
-use crate::status::{EqPresets, NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
+use crate::status::{EqBand, EqPreset, EqPresets, NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
 use crate::transport::Transport;
 
 pub mod realme_t310;
@@ -60,6 +60,14 @@ pub trait Session: Send {
         Err(Error::Unsupported(
             "budctl cannot change the EQ on these buds".to_owned(),
         ))
+    }
+
+    /// Change the gains of some bands of a custom EQ preset (`custom-<id>`), save it and select
+    /// it, then read it back. With no bands, it only selects the preset.
+    fn set_custom_eq(&mut self, preset: &str, _bands: &[EqBand]) -> Result<EqPreset> {
+        Err(Error::Unsupported(format!(
+            "budctl cannot change {preset} on these buds"
+        )))
     }
 
     /// Set the bass level. Only the ack can be checked when the buds cannot report the level.
