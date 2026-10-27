@@ -33,6 +33,7 @@ budctl eq deep-bass                        # select a preset
 budctl eq custom-4 50=+3 16000=-2          # change bands of a custom preset (dB)
 budctl game on|off                         # game mode (low latency)
 budctl set bass-boost|spatial|wind|dual on|off
+budctl dual                                # the phones and computers dual connection keeps
 budctl bass 2                              # bass level, -5 to +5
 budctl touch                               # what each tap and hold does
 budctl touch left triple-tap previous      # give a gesture an action (--dry-run first, if you like)
@@ -62,7 +63,7 @@ Exit codes:
 - **Overview:** battery, noise control, the switches.
 - **Equalizer:** presets, the bands of your custom presets, the bass level.
 - **Gestures:** what each tap and hold does on each bud, and what a hold steps through.
-- **Earbud settings:** find my earbuds, firmware, audio codec.
+- **Earbud settings:** dual connection and the devices it keeps, find my earbuds, firmware, audio codec.
 - **App settings.**
 
 The app connects when it needs to, and frees the buds' control channel 10 s after your last

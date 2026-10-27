@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use budctl_core::bluez::PairedDevice;
 use budctl_core::devices::Device;
 use budctl_core::status::{
-    Charge, EqPreset, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls,
+    Charge, DualDevice, EqPreset, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls,
 };
 use budctl_core::{Error, Found};
 use serde_json::Value;
@@ -452,6 +452,38 @@ pub fn bass_level(
     Ok(())
 }
 
+/// The devices dual connection keeps: name, address, and whether each is connected.
+pub fn dual_devices(
+    out: &mut impl Write,
+    device: &PairedDevice,
+    model: &dyn Device,
+    devices: &[DualDevice],
+    as_json: bool,
+) -> Result<(), Failure> {
+    if as_json {
+        return json(out, Some((device, model)), serde_json::json!({ "devices": devices }));
+    }
+    header(out, device, model)?;
+    if devices.is_empty() {
+        writeln!(out, "  No devices listed.")?;
+    }
+    let width = devices.iter().map(|d| d.name.chars().count()).max().unwrap_or(0);
+    for d in devices {
+        let mut state = vec![if d.connected { "connected" } else { "not connected" }];
+        for (on, what) in [
+            (d.this_computer, "this computer"),
+            (d.main_audio, "main audio"),
+            (d.playing, "playing"),
+        ] {
+            if on {
+                state.push(what);
+            }
+        }
+        writeln!(out, "  {:<width$}  {}  {}", d.name, d.address, state.join(", "))?;
+    }
+    Ok(())
+}
+
 /// After `find start` or `find stop`: the buds acked; there is nothing to read back.
 pub fn find(
     out: &mut impl Write,
@@ -470,4 +502,60 @@ pub fn find(
         writeln!(out, "  Stopped ringing.")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use budctl_core::devices::REGISTRY;
+
+    #[test]
+    fn dual_devices_line_up_and_keep_their_json_names() {
+        let buds = PairedDevice {
+            address: "88:0E:85:46:FE:5C".parse().unwrap(),
+            name: "realme Buds T310".to_owned(),
+            alias: "realme Buds T310".to_owned(),
+            connected: true,
+            uuids: Vec::new(),
+        };
+        let model = *REGISTRY.first().unwrap();
+        let devices = [
+            DualDevice {
+                address: "2B:1A:00:AA:BB:CC".parse().unwrap(),
+                name: "arch".to_owned(),
+                connected: true,
+                this_computer: true,
+                main_audio: true,
+                playing: false,
+            },
+            DualDevice {
+                address: "11:22:33:44:55:66".parse().unwrap(),
+                name: "Pixel 8".to_owned(),
+                connected: false,
+                this_computer: false,
+                main_audio: false,
+                playing: false,
+            },
+        ];
+        let mut text = Vec::new();
+        assert!(dual_devices(&mut text, &buds, model, &devices, false).is_ok());
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "realme Buds T310 (88:0E:85:46:FE:5C)\n\
+             \x20 arch     2B:1A:00:AA:BB:CC  connected, this computer, main audio\n\
+             \x20 Pixel 8  11:22:33:44:55:66  not connected\n"
+        );
+
+        let mut json_out = Vec::new();
+        assert!(dual_devices(&mut json_out, &buds, model, &devices, true).is_ok());
+        let value: Value = serde_json::from_slice(&json_out).unwrap();
+        assert_eq!(value["schema"], 1);
+        assert_eq!(value["devices"][0]["this_computer"], true);
+        assert_eq!(value["devices"][1]["address"], "11:22:33:44:55:66");
+        assert_eq!(value["devices"][1]["connected"], false);
+
+        let mut empty = Vec::new();
+        assert!(dual_devices(&mut empty, &buds, model, &[], false).is_ok());
+        assert!(String::from_utf8(empty).unwrap().ends_with("  No devices listed.\n"));
+    }
 }

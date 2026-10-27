@@ -79,6 +79,7 @@ budctl touch                     # touch controls (gesture table) per bud
 budctl anc off|on|transparency
 budctl eq <preset>
 budctl game on|off
+budctl dual                      # dual connection: the devices the buds keep (read-only)
 budctl --device <MAC> ...        # when more than one supported device is paired
 budctl --json status             # machine-readable output for scripts/status bars ("schema": 1)
 budctl --debug ...               # hex-dump every frame sent/received (stderr)

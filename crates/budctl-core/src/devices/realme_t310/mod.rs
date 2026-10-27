@@ -10,8 +10,8 @@ use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
 use crate::status::{
-    EqBand, EqPreset, EqPresets, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch, TouchChange,
-    TouchControls,
+    DualDevice, EqBand, EqPreset, EqPresets, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch,
+    TouchChange, TouchControls,
 };
 use crate::transport::Transport;
 
@@ -522,6 +522,16 @@ impl Session for T310Session {
     }
 
     /// Spec: realme_t310.md#switch-write, #write-read-back
+    /// Read-only: the T310 has no device manager. Spec: realme_t310.md#dual-devices, #dual-manager
+    fn dual_devices(&mut self) -> Result<Vec<DualDevice>> {
+        if !self.commands.allows(codec::DUAL_DEVICES) {
+            return Err(Error::Unsupported(
+                "these buds do not list the devices they connect to".to_owned(),
+            ));
+        }
+        codec::decode_dual_devices(&self.link.request(codec::DUAL_DEVICES, &[])?)
+    }
+
     fn set_switch(&mut self, key: &str, on: bool) -> Result<Switch> {
         let Some(id) = codec::switch_id(key) else {
             return Err(Error::Unsupported(format!("these buds have no switch called {key}")));
@@ -1151,6 +1161,39 @@ mod tests {
             rx(0x8200, 0x03, "00 00"),
         ]);
         let result = open(&script).unwrap().find(true);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn lists_the_dual_connection_devices() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0112, 0x05, ""),
+            rx(0x8112, 0x05, "00 01 CC BB AA 00 1A 2B 07 02 01 04 61 72 63 68"),
+        ]);
+        let script = Script::new(steps);
+        let devices = open(&script).unwrap().dual_devices().unwrap();
+        script.assert_done();
+        let [computer] = devices.as_slice() else {
+            panic!("one device expected: {devices:?}");
+        };
+        assert_eq!(computer.address.to_string(), "2B:1A:00:AA:BB:CC");
+        assert!(computer.connected && computer.this_computer);
+    }
+
+    #[test]
+    fn the_dual_connection_list_is_not_asked_for_without_its_bitmap_bit() {
+        // Bytes 0-2 of the T310's bitmap and a clear byte 3: no bit 29.
+        let script = Script::new(vec![
+            tx(0x0100, 0x01, ""),
+            rx(0x8100, 0x01, "00 BF 1F 5A 00"),
+            tx(0x0103, 0x02, ""),
+            rx(0x8103, 0x02, "00 12 3C 06"),
+            tx(0x0200, 0x03, ""),
+            rx(0x8200, 0x03, "00 00"),
+        ]);
+        let result = open(&script).unwrap().dual_devices();
         script.assert_done();
         assert!(matches!(result, Err(Error::Unsupported(_))));
     }

@@ -1,10 +1,11 @@
 //! realme Buds T310 commands, tables and pure decoders. No I/O here, so every function can be
 //! tested with bytes from the spec. Each constant cites docs/protocol/realme_t310.md.
 
+use crate::bt::BdAddr;
 use crate::error::{Error, Result};
 use crate::reader::Reader;
 use crate::status::{
-    AncLevel, Battery, Charge, EqBand, EqPreset, Gesture, GestureChoice, NoiseControl, NoiseMode, Switch,
+    AncLevel, Battery, Charge, DualDevice, EqBand, EqPreset, Gesture, GestureChoice, NoiseControl, NoiseMode, Switch,
 };
 
 /// Spec: realme_t310.md#bitmap
@@ -56,6 +57,16 @@ pub(super) fn find_payload(ring: bool) -> [u8; 1] {
 pub(super) const EQ_PRESET: u16 = 0x010F;
 /// Spec: realme_t310.md#codec
 pub(super) const CODEC: u16 = 0x0114;
+/// Spec: realme_t310.md#dual-devices
+pub(super) const DUAL_DEVICES: u16 = 0x0112;
+/// The state of a connected device. Spec: realme_t310.md#dual-devices
+const DUAL_CONNECTED: u8 = 0x02;
+/// Flag bits: the device that asked, the main audio device, playing. Spec: realme_t310.md#dual-devices
+const DUAL_THIS: u8 = 0x01;
+/// Spec: realme_t310.md#dual-devices
+const DUAL_MAIN_AUDIO: u8 = 0x02;
+/// Spec: realme_t310.md#dual-devices
+const DUAL_PLAYING: u8 = 0x04;
 /// Spec: realme_t310.md#custom-eq
 pub(super) const CUSTOM_EQ_LIST: u16 = 0x0122;
 /// Spec: realme_t310.md#custom-eq
@@ -196,6 +207,7 @@ fn gate(cmd: u16) -> Option<Gate> {
         0x010F | 0x0406 => Gate::Bit(10),
         0x0114 => Gate::Bit(17),
         0x0205 => Gate::Bit(22),
+        0x0112 => Gate::Bit(29),
         0x0122 | 0x0418 => Gate::Bit(34),
         0x0124 | 0x041B => Gate::Bit(38),
         _ => return None,
@@ -326,6 +338,32 @@ pub(super) fn decode_firmware(reply: &[u8]) -> Result<String> {
 pub(super) fn decode_codec(reply: &[u8]) -> Result<String> {
     let codec = ok_reply(reply, "the codec reply")?.u8()?;
     Ok(name_of(&CODECS, codec).map_or_else(|| format!("unknown (0x{codec:02X})"), str::to_owned))
+}
+
+/// Each entry: the address last byte first, `len`, then `len` bytes: state, flags, the name's
+/// length and the name. Spec: realme_t310.md#dual-devices
+pub(super) fn decode_dual_devices(reply: &[u8]) -> Result<Vec<DualDevice>> {
+    let mut r = ok_reply(reply, "the dual-connection list")?;
+    let count = r.u8()?;
+    let mut devices = Vec::new();
+    for _ in 0..count {
+        let address = r.array()?;
+        let len = r.u8()?;
+        let mut entry = Reader::new(r.take(usize::from(len))?, "a dual-connection entry");
+        let state = entry.u8()?;
+        let flags = entry.u8()?;
+        let name_len = entry.u8()?;
+        let name = String::from_utf8_lossy(entry.take(usize::from(name_len))?).into_owned();
+        devices.push(DualDevice {
+            address: BdAddr::from_reversed(address),
+            name,
+            connected: state == DUAL_CONNECTED,
+            this_computer: flags & DUAL_THIS != 0,
+            main_audio: flags & DUAL_MAIN_AUDIO != 0,
+            playing: flags & DUAL_PLAYING != 0,
+        });
+    }
+    Ok(devices)
 }
 
 /// Spec: realme_t310.md#anc-read
@@ -863,13 +901,16 @@ mod tests {
         let commands = Commands::parse(&hex(T310_BITMAP_REPLY)).unwrap();
         // Every gated command in the T310's logged command set (realme_t310.md#bitmap-t310).
         for cmd in [
-            0x0100, 0x0103, 0x0105, 0x0106, 0x0108, 0x0109, 0x010C, 0x010D, 0x010F, 0x0114, 0x0122, 0x0124, 0x0205,
-            0x0400, 0x0401, 0x0403, 0x0404, 0x0405, 0x0406, 0x0418, 0x041B, 0x0200,
+            0x0100, 0x0103, 0x0105, 0x0106, 0x0108, 0x0109, 0x010C, 0x010D, 0x010F, 0x0112, 0x0114, 0x0122, 0x0124,
+            0x0205, 0x0400, 0x0401, 0x0403, 0x0404, 0x0405, 0x0406, 0x0418, 0x041B, 0x0200,
         ] {
             assert!(commands.allows(cmd), "0x{cmd:04X} should be allowed");
         }
-        // Commands the T310 lacks, and commands budctl has no gate for.
-        for cmd in [0x012F, 0x041E, 0x0413, 0x0130, 0x0427, 0x0423, 0x012A, 0x0422, 0x9999] {
+        // Commands the T310 lacks (the dual-connection device manager among them), and commands
+        // budctl has no gate for.
+        for cmd in [
+            0x012F, 0x041E, 0x0413, 0x0130, 0x0427, 0x0423, 0x012A, 0x0422, 0x0429, 0x0132, 0x9999,
+        ] {
             assert!(!commands.allows(cmd), "0x{cmd:04X} should be refused");
         }
     }
@@ -1052,6 +1093,40 @@ mod tests {
         assert_eq!(decode_eq(&hex("00 05")).unwrap(), "custom-5");
         assert_eq!(decode_codec(&hex("00 02")).unwrap(), "AAC");
         assert_eq!(decode_codec(&hex("00 09")).unwrap(), "unknown (0x09)");
+    }
+
+    #[test]
+    fn dual_devices_from_the_spec_example() {
+        let devices = decode_dual_devices(&hex(
+            "00 02 66 55 44 33 22 11 0A 02 06 07 50 69 78 65 6C 20 38 CC BB AA 00 1A 2B 07 02 01 04 61 72 63 68",
+        ))
+        .unwrap();
+        let [phone, computer] = devices.as_slice() else {
+            panic!("two devices expected: {devices:?}");
+        };
+        assert_eq!(phone.address.to_string(), "11:22:33:44:55:66");
+        assert_eq!(phone.name, "Pixel 8");
+        assert!(phone.connected && phone.main_audio && phone.playing && !phone.this_computer);
+        assert_eq!(computer.address.to_string(), "2B:1A:00:AA:BB:CC");
+        assert_eq!(computer.name, "arch");
+        assert!(computer.connected && computer.this_computer && !computer.main_audio && !computer.playing);
+    }
+
+    #[test]
+    fn dual_devices_skip_by_len_and_keep_disconnected_ones() {
+        // A device that left (state 00) with two bytes after its name, then an empty list.
+        let devices = decode_dual_devices(&hex("00 01 01 02 03 04 05 06 06 00 00 01 41 FF FF")).unwrap();
+        let [gone] = devices.as_slice() else {
+            panic!("one device expected: {devices:?}");
+        };
+        assert_eq!(gone.address.to_string(), "06:05:04:03:02:01");
+        assert_eq!(gone.name, "A");
+        assert!(!gone.connected && !gone.this_computer);
+        assert!(decode_dual_devices(&hex("00 00")).unwrap().is_empty());
+        // A name longer than its entry, an entry cut short, a refusal.
+        assert!(decode_dual_devices(&hex("00 01 01 02 03 04 05 06 04 02 00 05 41")).is_err());
+        assert!(decode_dual_devices(&hex("00 01 01 02 03 04 05 06 07 02 00 04 61")).is_err());
+        assert!(decode_dual_devices(&hex("01")).is_err());
     }
 
     #[test]

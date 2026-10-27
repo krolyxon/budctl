@@ -1,8 +1,10 @@
 //! The buds the window shows: made-up ones for `--demo` (roughly what the owner's T310 reported
 //! at the last checkpoints), or an empty pair until the real buds answer.
 
+use budctl_core::bt::BdAddr;
 use budctl_core::status::{
-    Battery, Charge, EqBand, EqPreset, EqPresets, Gesture, GestureChoice, NoiseControl, Status, Switch, TouchControls,
+    Battery, Charge, DualDevice, EqBand, EqPreset, EqPresets, Gesture, GestureChoice, NoiseControl, Status, Switch,
+    TouchControls,
 };
 
 /// The buds the window shows.
@@ -18,6 +20,8 @@ pub struct Buds {
     pub bass_range: Option<(i8, i8)>,
     /// The bass level last set from this window. The buds do not report it.
     pub bass: Option<i8>,
+    /// The devices dual connection keeps, when the buds list them.
+    pub dual: Option<Vec<DualDevice>>,
 }
 
 impl Buds {
@@ -182,6 +186,24 @@ pub fn demo() -> Buds {
         }),
         bass_range: Some((-5, 5)),
         bass: None,
+        dual: Some(vec![
+            DualDevice {
+                address: BdAddr::new([0x2B, 0x1A, 0x00, 0xAA, 0xBB, 0xCC]),
+                name: "arch".to_owned(),
+                connected: true,
+                this_computer: true,
+                main_audio: false,
+                playing: false,
+            },
+            DualDevice {
+                address: BdAddr::new([0x11, 0x22, 0x33, 0x44, 0x55, 0x66]),
+                name: "Pixel 8".to_owned(),
+                connected: true,
+                this_computer: false,
+                main_audio: true,
+                playing: true,
+            },
+        ]),
     }
 }
 
@@ -195,6 +217,7 @@ pub fn unknown() -> Buds {
         touch: None,
         bass_range: None,
         bass: None,
+        dual: None,
     }
 }
 

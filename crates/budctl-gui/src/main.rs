@@ -749,6 +749,7 @@ impl App {
         self.buds.eq = reading.eq;
         self.buds.touch = reading.touch;
         self.buds.bass_range = reading.bass_range;
+        self.buds.dual = reading.dual;
         if let Some(level) = reading
             .status
             .noise_control
@@ -1628,6 +1629,7 @@ mod tests {
             eq: buds::demo().eq,
             touch: buds::demo().touch,
             bass_range: buds::demo().bass_range,
+            dual: buds::demo().dual,
         }
     }
 

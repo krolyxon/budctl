@@ -12,6 +12,18 @@ use crate::error::{Error, Result};
 pub struct BdAddr([u8; 6]);
 
 impl BdAddr {
+    /// An address from its bytes, in the order people write it.
+    pub const fn new(bytes: [u8; 6]) -> Self {
+        BdAddr(bytes)
+    }
+
+    /// An address stored last byte first, as the kernel's `bdaddr_t` and some buds' replies
+    /// store it.
+    pub(crate) fn from_reversed(mut bytes: [u8; 6]) -> Self {
+        bytes.reverse();
+        BdAddr(bytes)
+    }
+
     /// The address as the kernel's `bdaddr_t` stores it: reversed.
     /// Spec: transport.md#sockets
     pub(crate) fn kernel_order(self) -> [u8; 6] {

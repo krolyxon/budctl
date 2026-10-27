@@ -131,6 +131,7 @@ Gate table for every command budctl uses or documents here:
 | `0x010F` EQ read, `0x0406` EQ select | bit 10 |
 | `0x0114` current codec | bit 17 |
 | `0x0205` subscribe | bit 22 |
+| `0x0112` dual-connection devices | bit 29 |
 | `0x0122` custom EQ list, `0x0418` custom EQ write | bit 34 |
 | `0x0124` bass level read, `0x041B` bass level write | bit 38 |
 
@@ -150,6 +151,7 @@ Gate table for every command budctl uses or documents here:
   - `0x0133`/`0x042D` tap sensitivity (bit 61).
   - `0x0423` game sound (bit 49).
   - `0x012A`/`0x0422` spatial type (bit 47).
+  - `0x0429`/`0x0132` dual-connection device manager (bit 59): connect, disconnect, unpair, preferred device ([§9.10](#dual-manager)).
 
 <a id="init"></a>
 ## 6. Session start
@@ -207,6 +209,7 @@ budctl reads none of these yet. It skips them while waiting for replies (and pri
   | `03` | noise control | `01 01 <mask LE>` = new mode; `02 <kind> <mask>` = new hold cycle (not a mode) |
   | `04` | fit-test result | `(<dev> <result>)…` |
   | `05` | game mode | `<state>`. **The T310 never sends this** (*t310*) |
+  | `06` | dual-connection devices | `<count> <entries…>`, as in [§9.10](#dual-devices) (*buds4*) |
   | `F1` | a gesture fired | `<side> <button> <act> <fn> …`. Diagnostic only |
 
 - **`0x0503`** `<count> (<id> <value>)…`: switch values changed (*vendor*, other realme models).
@@ -358,6 +361,31 @@ Evidence: *vendor*
 - **Reply:** `00 02 01 <mask LE>`. The mask lists which modes a hold steps through, using the noise-control bits: `01` off, `02` transparency, `08` noise cancelling.
 - **Both buds.** On realme buds one setting covers both buds (kind `01`).
 - **When it applies.** The cycle is used only where a bud's hold gesture is `fn 08`.
+
+<a id="dual-devices"></a>
+### 9.10 Dual-connection devices: `0x0112`
+
+The phones and computers the buds keep for dual connection, and which of them are connected now. budctl only reads this list.
+
+- **Gate:** bit 29 (*vendor*). The T310's command set lists `0112` (*t310*), and the owner's T310 sets bit 29 (*ours-2026-10-27*).
+- **Request:** no payload (*vendor*).
+- **Reply:** `00 <count>`, then `count` entries (*buds4*):
+
+  | Bytes | Field |
+  |---|---|
+  | 6 | the device's Bluetooth address, last byte first |
+  | 1 | `len`: how many bytes of the entry follow |
+  | 1 | state: `02` connected, `00` not connected |
+  | 1 | flags |
+  | 1 | name length |
+  | name length | the device's name, UTF-8 |
+
+- **`len`** covers the state, the flags, the name length and the name, so it is 3 more than the name length (*buds4*). budctl finds the next entry with `len`, and ignores any bytes after the name (*derived*).
+- **Flags** (*vendor*): bit 0 marks the device that asked (for budctl, the computer it runs on), bit 1 the main audio device, bit 2 a device playing audio. Bits 3-5 give the kind of device; their values are not known, so budctl does not show them.
+- **A device that disconnects stays in the list**, with state `00` (*buds4*).
+- **Example** (*derived* from the layout; not seen on a T310): `00 02 66 55 44 33 22 11 0A 02 06 07 50 69 78 65 6C 20 38 CC BB AA 00 1A 2B 07 02 01 04 61 72 63 68` lists two connected devices: "Pixel 8" at `11:22:33:44:55:66`, the main audio device and playing, and "arch" at `2B:1A:00:AA:BB:CC`, the device that asked.
+- **Push.** Event `06` of `0x0204` carries the same list, `06 <count> <entries…>`, when it changes (*buds4*). The T310 offers event `06` ([§6](#events-offered)), but budctl does not subscribe to it.
+- <a id="dual-manager"></a>**No device manager on the T310.** Connecting, disconnecting or unpairing one of these devices, and choosing a preferred one, are other commands (`0x0429`, read `0x0132`). They belong to bit 59, which the owner's T310 leaves clear (*ours-2026-10-27*, [§5](#bitmap-t310)), and the vendor data gives the T310 no device manager (*vendor*). budctl never sends them.
 
 <a id="writes"></a>
 ## 10. Writes
@@ -527,7 +555,7 @@ Evidence: *vendor*
 
 - **Wear detection.** Id `04` was refused with `01` (*t310*), and there is no in-ear sensor. A bud out of the case reads as "out" in every state.
 - **Hi-Res** `18`, **hearing profile** `0B`, **game sound** `27`, **hold volume** `35`: refused with `01` (*t310*).
-- **Not in the T310 bitmap** ([§5](#bitmap-t310)): alert volume, tap sensitivity, spatial type, 3D-audio source, game EQ, head gestures, personalised ANC and batch query.
+- **Not in the T310 bitmap** ([§5](#bitmap-t310)): alert volume, tap sensitivity, spatial type, 3D-audio source, game EQ, head gestures, personalised ANC, batch query, and the dual-connection device manager ([§9.10](#dual-manager)).
 
 <a id="open"></a>
 ## 12. Open questions (need a capture or a test on the owner's buds)
@@ -552,6 +580,8 @@ The owner runs each checkpoint with `--debug` and pastes the output. Results go 
 **HW1, read-only:**
 - Run `budctl list`, `budctl --debug status`, `budctl --json status` and `budctl --debug touch`.
 - Then run `status` again twice: once while the phone app is connected (the busy path), and once with the case lid closed (the not-connected path).
+
+**HW2, read-only:** `budctl --debug dual` ([§9.10](#dual-devices)), first with only this computer connected, then with the phone connected too (dual connection on).
 
 **Writes, one per checkpoint, in this order:**
 

@@ -30,6 +30,8 @@ pub enum Icon {
     Keys,
     Pencil,
     Trash,
+    Laptop,
+    Phone,
 }
 
 /// `icon` at `size` pixels, in `color`.
@@ -291,6 +293,14 @@ fn draw_icon(pen: &mut Pen, icon: Icon) {
             pen.line((8.0, 14.0), (16.0, 14.0));
         }
         Icon::Check => pen.polyline(&[(4.5, 12.5), (9.5, 17.5), (19.5, 7.0)], false),
+        Icon::Laptop => {
+            pen.rect(4.0, 5.0, 16.0, 11.0, 1.5);
+            pen.line((2.0, 19.0), (22.0, 19.0));
+        }
+        Icon::Phone => {
+            pen.rect(7.0, 2.5, 10.0, 19.0, 2.0);
+            pen.line((10.5, 18.5), (13.5, 18.5));
+        }
     }
 }
 

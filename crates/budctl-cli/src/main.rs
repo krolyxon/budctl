@@ -105,6 +105,8 @@ enum Command {
         #[arg(value_enum)]
         state: OnOff,
     },
+    /// The phones and computers the buds keep for dual connection, and which are connected.
+    Dual,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -353,6 +355,10 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let now = session.set_switch("game", matches!(state, OnOff::On))?;
             output::switch(out, &device, model, &now, cli.json)
         }
+        Command::Dual => {
+            let devices = session.dual_devices()?;
+            output::dual_devices(out, &device, model, &devices, cli.json)
+        }
     }
 }
 
@@ -397,6 +403,12 @@ mod tests {
         Cli::try_parse_from(std::iter::once("budctl").chain(args.iter().copied()))
             .unwrap()
             .command
+    }
+
+    #[test]
+    fn dual_takes_nothing() {
+        assert!(matches!(parse(&["dual"]), Command::Dual));
+        assert!(Cli::try_parse_from(["budctl", "dual", "off"]).is_err());
     }
 
     #[test]

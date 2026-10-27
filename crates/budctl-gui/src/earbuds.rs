@@ -1,5 +1,6 @@
-//! The Earbud settings page: dual connection, find the buds, and what they run.
+//! The Earbud settings page: dual connection and its devices, find the buds, and what they run.
 
+use budctl_core::status::DualDevice;
 use iced::Element;
 use iced::widget::{column, text};
 
@@ -85,8 +86,74 @@ pub fn view<'a>(look: Look, buds: &'a Buds, ringing: bool, marks: Marks) -> Elem
     ];
     column![ui::title(look, "Earbud settings")]
         .push(dual)
+        .push(buds.dual.as_deref().map(|list| devices(look, list)))
         .push(column![ui::heading(look, "Find my earbuds"), ui::card(look, vec![find])].spacing(10))
         .push(column![ui::heading(look, "About these buds"), ui::card(look, facts)].spacing(10))
         .spacing(18)
         .into()
+}
+
+/// The devices dual connection keeps, as the buds list them. Nothing here can be changed: the
+/// buds take no command to connect, disconnect or forget one.
+fn devices<'a>(look: Look, list: &'a [DualDevice]) -> Element<'a, Message> {
+    let p = look.p;
+    let rows: Vec<Element<'a, Message>> = list
+        .iter()
+        .map(|device| {
+            let icon = if device.this_computer {
+                Icon::Laptop
+            } else {
+                Icon::Phone
+            };
+            let name = if device.name.is_empty() {
+                "Unnamed device"
+            } else {
+                device.name.as_str()
+            };
+            let address = text(device.address.to_string()).size(13).color(p.dim);
+            ui::setting(look, icon, name, Some(state(device)), address.into(), None, false)
+        })
+        .collect();
+    let list: Element<'a, Message> = if rows.is_empty() {
+        text("The buds list no devices.").size(13).color(p.dim).into()
+    } else {
+        ui::card(look, rows)
+    };
+    let note = text("These buds cannot connect, disconnect or forget a device from here.")
+        .size(13)
+        .color(p.dim);
+    column![ui::heading(look, "Devices"), list, note].spacing(10).into()
+}
+
+/// "Connected · this computer", "Not connected"…
+fn state(device: &DualDevice) -> String {
+    let mut words = vec![if device.connected { "Connected" } else { "Not connected" }];
+    for (on, what) in [
+        (device.this_computer, "this computer"),
+        (device.main_audio, "main audio"),
+        (device.playing, "playing"),
+    ] {
+        if on {
+            words.push(what);
+        }
+    }
+    words.join(" · ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buds;
+
+    #[test]
+    fn device_states_in_words() {
+        let dual = buds::demo().dual.unwrap();
+        let words: Vec<String> = dual.iter().map(state).collect();
+        assert_eq!(words, ["Connected · this computer", "Connected · main audio · playing"]);
+        let mut gone = dual[1].clone();
+        gone.connected = false;
+        gone.main_audio = false;
+        gone.playing = false;
+        assert_eq!(state(&gone), "Not connected");
+    }
 }

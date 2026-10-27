@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use budctl_core::bt::BdAddr;
 use budctl_core::devices::Session;
 use budctl_core::status::{
-    EqBand, EqPreset, EqPresets, Gesture, NoiseControl, NoiseMode, Status, Switch, TouchControls,
+    DualDevice, EqBand, EqPreset, EqPresets, Gesture, NoiseControl, NoiseMode, Status, Switch, TouchControls,
 };
 use budctl_core::{Error, Kind, Result};
 use iced::futures::channel::mpsc as channel;
@@ -99,6 +99,8 @@ pub struct Reading {
     pub touch: Option<TouchControls>,
     /// The levels the bass level takes, when the buds have one to set.
     pub bass_range: Option<(i8, i8)>,
+    /// The devices dual connection keeps, when the buds list them.
+    pub dual: Option<Vec<DualDevice>>,
 }
 
 /// The worker, as a stream of events for an iced subscription. `device` picks the buds, as
@@ -147,6 +149,9 @@ struct Worker {
     last_command: Instant,
     /// How long the session stays open after the last command.
     idle: Duration,
+    /// The buds once left the dual-connection list unanswered. They are not asked again, so
+    /// a reading does not wait for that timeout every time.
+    dual_unanswered: bool,
 }
 
 impl Worker {
@@ -157,6 +162,7 @@ impl Worker {
             events,
             last_command: Instant::now(),
             idle,
+            dual_unanswered: false,
         }
     }
 
@@ -268,16 +274,26 @@ impl Worker {
     }
 
     fn read(&mut self) -> Result<Reading> {
+        let ask_dual = !self.dual_unanswered;
         let session = self.session()?;
         let status = session.status()?;
         let eq = session.eq_presets().ok();
         let touch = session.touch_controls().ok();
         let bass_range = session.bass_range();
+        let dual = match ask_dual.then(|| session.dual_devices()) {
+            Some(Ok(devices)) => Some(devices),
+            Some(Err(Error::Timeout(_))) => {
+                self.dual_unanswered = true;
+                None
+            }
+            Some(Err(_)) | None => None,
+        };
         Ok(Reading {
             status,
             eq,
             touch,
             bass_range,
+            dual,
         })
     }
 
@@ -316,6 +332,8 @@ mod tests {
         closed: Arc<AtomicBool>,
         /// Make `serve` fail, as when the buds drop the link.
         drop_link: Arc<AtomicBool>,
+        /// How often the dual-connection list was asked for. The fake buds never answer it.
+        dual_asked: Arc<AtomicUsize>,
     }
 
     struct Fake(Probe);
@@ -323,6 +341,11 @@ mod tests {
     impl Session for Fake {
         fn status(&mut self) -> Result<Status> {
             Ok(Status::default())
+        }
+
+        fn dual_devices(&mut self) -> Result<Vec<DualDevice>> {
+            self.0.dual_asked.fetch_add(1, Ordering::SeqCst);
+            Err(Error::Timeout("the dual-connection list".to_owned()))
         }
 
         fn serve(&mut self) -> Result<()> {
@@ -392,6 +415,25 @@ mod tests {
         assert_eq!(probe.opened.load(Ordering::SeqCst), 2);
 
         // The window goes away: the worker ends.
+        drop(commands);
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn a_dual_list_left_unanswered_is_not_asked_for_again() {
+        let probe = Probe::default();
+        let (commands, mut events, thread) = start(&probe);
+        commands.send(Command::Read).unwrap();
+        commands.send(Command::Read).unwrap();
+        assert!(matches!(block_on(events.next()), Some(Event::Found(_))));
+        for _ in 0..2 {
+            let Some(Event::Read(reading)) = block_on(events.next()) else {
+                panic!("a reading expected");
+            };
+            assert!(reading.dual.is_none());
+        }
+        assert_eq!(probe.dual_asked.load(Ordering::SeqCst), 1);
+
         drop(commands);
         thread.join().unwrap();
     }

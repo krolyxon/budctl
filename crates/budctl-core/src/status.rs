@@ -3,6 +3,8 @@
 
 use serde::{Serialize, Serializer};
 
+use crate::bt::BdAddr;
+
 /// Bumped whenever the JSON shape changes incompatibly.
 pub const JSON_SCHEMA: u32 = 1;
 
@@ -156,6 +158,20 @@ pub struct EqBand {
     pub hz: u16,
     /// dB.
     pub gain: i8,
+}
+
+/// A phone or computer the buds keep for dual connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DualDevice {
+    pub address: BdAddr,
+    /// The name the device gave the buds.
+    pub name: String,
+    pub connected: bool,
+    /// The device that asked: the computer budctl runs on.
+    pub this_computer: bool,
+    /// The device the buds take audio from.
+    pub main_audio: bool,
+    pub playing: bool,
 }
 
 /// A touch-control change: what changes, the write that does it and, once sent, the table the

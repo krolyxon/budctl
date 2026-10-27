@@ -52,7 +52,8 @@ impl<'a> Reader<'a> {
         self.bytes.is_empty()
     }
 
-    fn array<const N: usize>(&mut self) -> Result<[u8; N]> {
+    /// The next `N` bytes, as an array.
+    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N]> {
         let (head, tail) = self.bytes.split_first_chunk::<N>().ok_or_else(|| self.too_short())?;
         self.bytes = tail;
         Ok(*head)

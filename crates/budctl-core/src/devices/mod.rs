@@ -6,7 +6,9 @@
 use crate::bluez::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
-use crate::status::{EqBand, EqPreset, EqPresets, NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls};
+use crate::status::{
+    DualDevice, EqBand, EqPreset, EqPresets, NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls,
+};
 use crate::transport::Transport;
 
 pub mod realme_t310;
@@ -119,6 +121,13 @@ pub trait Session: Send {
     /// checked: there is no state to read back.
     fn find(&mut self, _ring: bool) -> Result<()> {
         Err(Error::Unsupported("these buds cannot ring through budctl".to_owned()))
+    }
+
+    /// The phones and computers the buds keep for dual connection, and which are connected.
+    fn dual_devices(&mut self) -> Result<Vec<DualDevice>> {
+        Err(Error::Unsupported(
+            "these buds do not list the devices they connect to".to_owned(),
+        ))
     }
 
     /// Turn an on/off setting ([`Switch::key`]) on or off, then read it back.
