@@ -48,6 +48,13 @@ enum Command {
     },
     /// Select an EQ preset (pure-raw, deep-bass, pure-vocals, pure-bass), then read it back.
     Eq { preset: String },
+    /// Turn an on/off setting on or off, then read it back. Switches: game, bass-boost.
+    Set {
+        /// The switch's name, as `status --json` lists it.
+        switch: String,
+        #[arg(value_enum)]
+        state: OnOff,
+    },
     /// Turn game mode (low latency) on or off, then read it back.
     Game {
         #[arg(value_enum)]
@@ -141,6 +148,10 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         Command::Eq { ref preset } => {
             let now = session.set_eq(preset)?;
             output::eq(out, &device, model, &now, cli.json)
+        }
+        Command::Set { ref switch, state } => {
+            let now = session.set_switch(switch, matches!(state, OnOff::On))?;
+            output::switch(out, &device, model, &now, cli.json)
         }
         Command::Game { state } => {
             let now = session.set_switch("game", matches!(state, OnOff::On))?;

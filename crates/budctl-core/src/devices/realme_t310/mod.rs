@@ -43,7 +43,7 @@ const READ_BACK_PAUSE: Duration = Duration::from_millis(300);
 
 /// The switches budctl may write, each added after the previous one passed its hardware
 /// checkpoint (CLAUDE.md rule 4). Spec: realme_t310.md#switch-write
-const WRITABLE_SWITCHES: [(&str, ReadBack); 1] = [("game", GAME_READ_BACK)];
+const WRITABLE_SWITCHES: [(&str, ReadBack); 2] = [("game", GAME_READ_BACK), ("bass-boost", READ_BACK)];
 
 fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
@@ -292,7 +292,7 @@ impl Session for T310Session {
             return Err(Error::Unsupported(format!("these buds have no switch called {key}")));
         };
         let Some(&(_, timing)) = WRITABLE_SWITCHES.iter().find(|(k, _)| *k == key) else {
-            return Err(Error::Unsupported(format!("budctl cannot change {key} yet")));
+            return Err(Error::Unsupported(format!("changing {key} is not supported yet")));
         };
         if !self.commands.allows(codec::SWITCH_WRITE) || !self.commands.allows(codec::SWITCHES) {
             return Err(Error::Unsupported("these buds do not offer switch settings".to_owned()));
@@ -674,7 +674,7 @@ mod tests {
         steps.pop();
         let script = Script::new(steps);
         let mut session = open(&script).unwrap();
-        for key in ["dual", "wind", "spatial", "bass-boost"] {
+        for key in ["dual", "wind", "spatial"] {
             assert!(
                 matches!(session.set_switch(key, true), Err(Error::Unsupported(_))),
                 "{key}"
@@ -682,6 +682,21 @@ mod tests {
         }
         assert!(matches!(session.set_switch("turbo", true), Err(Error::Unsupported(_))));
         script.assert_done();
+    }
+
+    #[test]
+    fn sets_bass_boost_and_reads_it_back_at_once() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x0403, 0x05, "1D 01"),
+            rx(0x8403, 0x05, "00"),
+            tx(0x010D, 0x06, "06 05 06 11 1A 1B 1D"),
+            rx(0x810D, 0x06, "00 06 05 00 06 00 11 00 1A 01 1B 00 1D 01"),
+        ]);
+        let script = Script::new(steps);
+        let now = open(&script).unwrap().set_switch("bass-boost", true).unwrap();
+        script.assert_done();
+        assert_eq!((now.key, now.on), ("bass-boost", true));
     }
 
     #[test]
