@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=budctl
+GenericName=Earbuds
+Comment=Control your wireless earbuds: noise control, EQ, gestures, battery
+Exec=budctl-gui
+Icon=audio-headphones
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=earbuds;headphones;bluetooth;anc;noise;equalizer;gestures;
+StartupWMClass=budctl
