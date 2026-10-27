@@ -1170,7 +1170,7 @@ mod tests {
         let mut steps = handshake();
         steps.extend([
             tx(0x0112, 0x05, ""),
-            rx(0x8112, 0x05, "00 01 CC BB AA 00 1A 2B 07 02 01 04 61 72 63 68"),
+            rx(0x8112, 0x05, "00 01 2B 1A 00 AA BB CC 07 02 01 04 61 72 63 68"),
         ]);
         let script = Script::new(steps);
         let devices = open(&script).unwrap().dual_devices().unwrap();

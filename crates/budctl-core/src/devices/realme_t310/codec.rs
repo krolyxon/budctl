@@ -340,8 +340,8 @@ pub(super) fn decode_codec(reply: &[u8]) -> Result<String> {
     Ok(name_of(&CODECS, codec).map_or_else(|| format!("unknown (0x{codec:02X})"), str::to_owned))
 }
 
-/// Each entry: the address last byte first, `len`, then `len` bytes: state, flags, the name's
-/// length and the name. Spec: realme_t310.md#dual-devices
+/// Each entry: the address, first byte first; `len`; then `len` bytes: state, flags, the name's
+/// length and the name. Spec: realme_t310.md#dual-devices, #dual-address
 pub(super) fn decode_dual_devices(reply: &[u8]) -> Result<Vec<DualDevice>> {
     let mut r = ok_reply(reply, "the dual-connection list")?;
     let count = r.u8()?;
@@ -355,7 +355,7 @@ pub(super) fn decode_dual_devices(reply: &[u8]) -> Result<Vec<DualDevice>> {
         let name_len = entry.u8()?;
         let name = String::from_utf8_lossy(entry.take(usize::from(name_len))?).into_owned();
         devices.push(DualDevice {
-            address: BdAddr::from_reversed(address),
+            address: BdAddr::new(address),
             name,
             connected: state == DUAL_CONNECTED,
             this_computer: flags & DUAL_THIS != 0,
@@ -1095,21 +1095,46 @@ mod tests {
         assert_eq!(decode_codec(&hex("00 09")).unwrap(), "unknown (0x09)");
     }
 
+    /// The HW2 reply (realme_t310.md#dual-devices), with the addresses and two of the names
+    /// replaced by made-up ones of the same length.
+    const HW2_DUAL: &str = "00 04 \
+        02 00 00 00 00 01 15 02 00 12 4E 6F 74 68 69 6E 67 20 50 68 6F 6E 65 20 28 33 61 29 \
+        02 00 00 00 00 02 09 02 01 06 4C 65 67 69 6F 6E \
+        02 00 00 00 00 03 0A 00 00 07 50 68 6F 6E 65 20 41 \
+        02 00 00 00 00 04 0F 00 00 0C 46 72 69 65 6E 64 27 73 20 41 31 36";
+
     #[test]
-    fn dual_devices_from_the_spec_example() {
+    fn dual_devices_from_hw2() {
+        let devices = decode_dual_devices(&hex(HW2_DUAL)).unwrap();
+        let rows: Vec<(String, &str, bool, bool)> = devices
+            .iter()
+            .map(|d| (d.address.to_string(), d.name.as_str(), d.connected, d.this_computer))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("02:00:00:00:00:01".to_owned(), "Nothing Phone (3a)", true, false),
+                ("02:00:00:00:00:02".to_owned(), "Legion", true, true),
+                ("02:00:00:00:00:03".to_owned(), "Phone A", false, false),
+                ("02:00:00:00:00:04".to_owned(), "Friend's A16", false, false),
+            ]
+        );
+        assert!(devices.iter().all(|d| !d.main_audio && !d.playing));
+    }
+
+    #[test]
+    fn dual_device_flags() {
+        // Connected, the main audio device and playing; then all three flags.
         let devices = decode_dual_devices(&hex(
-            "00 02 66 55 44 33 22 11 0A 02 06 07 50 69 78 65 6C 20 38 CC BB AA 00 1A 2B 07 02 01 04 61 72 63 68",
+            "00 02 11 22 33 44 55 66 04 02 06 01 50 11 22 33 44 55 67 04 02 07 01 51",
         ))
         .unwrap();
         let [phone, computer] = devices.as_slice() else {
             panic!("two devices expected: {devices:?}");
         };
         assert_eq!(phone.address.to_string(), "11:22:33:44:55:66");
-        assert_eq!(phone.name, "Pixel 8");
         assert!(phone.connected && phone.main_audio && phone.playing && !phone.this_computer);
-        assert_eq!(computer.address.to_string(), "2B:1A:00:AA:BB:CC");
-        assert_eq!(computer.name, "arch");
-        assert!(computer.connected && computer.this_computer && !computer.main_audio && !computer.playing);
+        assert!(computer.this_computer && computer.main_audio && computer.playing);
     }
 
     #[test]
@@ -1119,7 +1144,7 @@ mod tests {
         let [gone] = devices.as_slice() else {
             panic!("one device expected: {devices:?}");
         };
-        assert_eq!(gone.address.to_string(), "06:05:04:03:02:01");
+        assert_eq!(gone.address.to_string(), "01:02:03:04:05:06");
         assert_eq!(gone.name, "A");
         assert!(!gone.connected && !gone.this_computer);
         assert!(decode_dual_devices(&hex("00 00")).unwrap().is_empty());

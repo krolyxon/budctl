@@ -368,22 +368,34 @@ Evidence: *vendor*
 The phones and computers the buds keep for dual connection, and which of them are connected now. budctl only reads this list.
 
 - **Gate:** bit 29 (*vendor*). The T310's command set lists `0112` (*t310*), and the owner's T310 sets bit 29 (*ours-2026-10-27*).
-- **Request:** no payload (*vendor*).
-- **Reply:** `00 <count>`, then `count` entries (*buds4*):
+- **Request:** no payload. The T310 answers it (*ours-2026-10-28*, HW2).
+- **Reply:** `00 <count>`, then `count` entries (*ours-2026-10-28*):
 
   | Bytes | Field |
   |---|---|
-  | 6 | the device's Bluetooth address, last byte first |
+  | 6 | the device's Bluetooth address, in the order people write it |
   | 1 | `len`: how many bytes of the entry follow |
   | 1 | state: `02` connected, `00` not connected |
   | 1 | flags |
   | 1 | name length |
   | name length | the device's name, UTF-8 |
 
-- **`len`** covers the state, the flags, the name length and the name, so it is 3 more than the name length (*buds4*). budctl finds the next entry with `len`, and ignores any bytes after the name (*derived*).
-- **Flags** (*vendor*): bit 0 marks the device that asked (for budctl, the computer it runs on), bit 1 the main audio device, bit 2 a device playing audio. Bits 3-5 give the kind of device; their values are not known, so budctl does not show them.
-- **A device that disconnects stays in the list**, with state `00` (*buds4*).
-- **Example** (*derived* from the layout; not seen on a T310): `00 02 66 55 44 33 22 11 0A 02 06 07 50 69 78 65 6C 20 38 CC BB AA 00 1A 2B 07 02 01 04 61 72 63 68` lists two connected devices: "Pixel 8" at `11:22:33:44:55:66`, the main audio device and playing, and "arch" at `2B:1A:00:AA:BB:CC`, the device that asked.
+- <a id="dual-address"></a>**Address order.** A capture from another model shows the address last byte first (*buds4*). The T310 sends it first byte first: the laptop's entry held its adapter's address exactly as BlueZ reports it (*ours-2026-10-28*, HW2).
+- **`len`** covers the state, the flags, the name length and the name, so it is 3 more than the name length. It was, in all four entries at HW2 (*ours-2026-10-28*). budctl finds the next entry with `len`, and ignores any bytes after the name (*derived*).
+- **Flags.**
+  - Bit 0 marks the device that asked, for budctl the computer it runs on: the laptop's entry had `01` (*ours-2026-10-28*).
+  - Bit 1 marks the main audio device and bit 2 a device playing audio (*vendor*). No entry had either set at HW2.
+  - Bits 3-5 give the kind of device (*vendor*), but the T310 left them 0 for phones and the laptop alike (*ours-2026-10-28*), so budctl does not use them.
+- **Devices that are not connected stay in the list**, with state `00`. At HW2 two phones that had connected before were listed that way (*ours-2026-10-28*).
+- **Example:** the HW2 reply, with the addresses and two of the names replaced by made-up ones of the same length:
+
+  ```
+  00 04
+  02 00 00 00 00 01  15  02 00 12  "Nothing Phone (3a)"   connected
+  02 00 00 00 00 02  09  02 01 06  "Legion"               connected, the device that asked
+  02 00 00 00 00 03  0A  00 00 07  "Phone A"              not connected
+  02 00 00 00 00 04  0F  00 00 0C  "Friend's A16"         not connected
+  ```
 - **Push.** Event `06` of `0x0204` carries the same list, `06 <count> <entries…>`, when it changes (*buds4*). The T310 offers event `06` ([§6](#events-offered)), but budctl does not subscribe to it.
 - <a id="dual-manager"></a>**No device manager on the T310.** Connecting, disconnecting or unpairing one of these devices, and choosing a preferred one, are other commands (`0x0429`, read `0x0132`). They belong to bit 59, which the owner's T310 leaves clear (*ours-2026-10-27*, [§5](#bitmap-t310)), and the vendor data gives the T310 no device manager (*vendor*). budctl never sends them.
 
@@ -581,7 +593,7 @@ The owner runs each checkpoint with `--debug` and pastes the output. Results go 
 - Run `budctl list`, `budctl --debug status`, `budctl --json status` and `budctl --debug touch`.
 - Then run `status` again twice: once while the phone app is connected (the busy path), and once with the case lid closed (the not-connected path).
 
-**HW2, read-only:** `budctl --debug dual` ([§9.10](#dual-devices)), first with only this computer connected, then with the phone connected too (dual connection on).
+**HW2, read-only:** `budctl --debug dual` ([§9.10](#dual-devices)) with the phone connected too (dual connection on). Done 2026-10-28. A second run with the phone disconnected was skipped: two other phones already showed state `00`.
 
 **Writes, one per checkpoint, in this order:**
 
@@ -606,6 +618,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-10-28 | HW2 `budctl --debug dual`, with the phone and the laptop connected | pass, with a fix | The T310 answered `0x0112` in 160 ms with four entries: the owner's phone (connected, flags `00`), the laptop (connected, flags `01`) and two phones that had connected before (state `00`). Every `len` was 3 more than the name length. The addresses came first byte first, so budctl printed them backwards; fixed the same day ([§9.10](#dual-address)). The addresses and other people's device names are left out of this log on purpose |
 | 2026-10-28 | W11e `eq delete custom-5` | pass | The delete matched the derived frame byte for byte, and was acked with `00 05`. The list read back at once is empty. Deleting the preset in use is still untested. See [§10.9](#custom-eq-delete) |
 | 2026-10-28 | W11d `eq rename custom-5 Gym` | pass | The save with the new name matched the derived frame byte for byte, and was acked with `00 05`. The list read back at once has id `05` named Gym, bands unchanged, in use. See [§10.9](#custom-eq-rename) |
 | 2026-10-28 | W11c `eq new Test` | pass | The create frame matched the derived one byte for byte, and was acked with `00 05`. The list read back at once has Test as id `05`, flat, and in use. See [§10.9](#custom-eq-create) |
