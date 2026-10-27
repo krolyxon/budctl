@@ -311,6 +311,8 @@ enum Message {
     DeletePreset(u8),
     /// The answer to "Delete the preset?".
     ConfirmDelete(bool),
+    /// The answer to "Turn dual connection off?".
+    ConfirmDual(bool),
     ShowHelp,
     /// Read the buds again.
     Refresh,
@@ -366,6 +368,8 @@ struct App {
     confirm_delete: Option<u8>,
     /// The custom preset whose bands are open on the Equalizer page.
     editing: Option<u8>,
+    /// "Turn dual connection off?" is open.
+    confirm_dual: bool,
 }
 
 impl App {
@@ -406,6 +410,7 @@ impl App {
             prompt: None,
             confirm_delete: None,
             editing: None,
+            confirm_dual: false,
         };
         app.refresh_palette();
         app
@@ -415,7 +420,15 @@ impl App {
         match message {
             Message::Open(page) => return self.open(page),
             Message::Noise(mode) => self.write(Item::NoiseMode, Command::Noise(mode)),
+            // Turning dual connection off may drop one of two connected devices: ask first.
+            Message::Switch(earbuds::DUAL, false) => self.confirm_dual = true,
             Message::Switch(key, on) => self.write(Item::Switch(key), Command::Switch(key, on)),
+            Message::ConfirmDual(yes) => {
+                self.confirm_dual = false;
+                if yes {
+                    self.write(Item::Switch(earbuds::DUAL), Command::Switch(earbuds::DUAL, false));
+                }
+            }
             Message::Preset(id) => self.select(id),
             Message::Band { preset, hz, gain, save } => {
                 self.move_band(preset, hz, gain);
@@ -947,6 +960,11 @@ impl App {
     }
 
     fn key(&mut self, key: &Key, modifiers: Modifiers) -> Task<Message> {
+        if self.confirm_dual {
+            // Only Enter turns it off; any other key says no.
+            let yes = matches!(key, Key::Named(keyboard::key::Named::Enter));
+            return self.update(Message::ConfirmDual(yes));
+        }
         if self.confirm_delete.is_some() {
             // Only Enter deletes; any other key says no.
             let yes = matches!(key, Key::Named(keyboard::key::Named::Enter));
@@ -1008,7 +1026,7 @@ impl App {
             Page::Overview if self.has_reading() => overview::items(&self.buds),
             Page::Equalizer if self.has_reading() => equalizer::items(&self.buds, self.editing),
             Page::Gestures if self.has_reading() => gestures::items(&self.buds),
-            Page::Earbuds if self.has_reading() => earbuds::items(),
+            Page::Earbuds if self.has_reading() => earbuds::items(&self.buds),
             _ => Vec::new(),
         }
     }
@@ -1271,6 +1289,8 @@ impl App {
             stack![window, self.name_prompt(prompt)].into()
         } else if let Some(id) = self.confirm_delete {
             stack![window, self.confirm_delete(id)].into()
+        } else if self.confirm_dual {
+            stack![window, self.confirm_dual()].into()
         } else {
             window.into()
         }
@@ -1413,6 +1433,34 @@ impl App {
         .spacing(10);
         let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
         let backdrop = container(container(dialog).width(480))
+            .center(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
+                ..container::Style::default()
+            });
+        opaque(backdrop)
+    }
+
+    /// "Turn dual connection off?", over a dimmed window: with two devices connected, the buds may
+    /// drop one.
+    fn confirm_dual(&self) -> Element<'_, Message> {
+        let look = self.look;
+        let p = look.p;
+        let words = column![
+            text("Turn dual connection off?").size(22).font(look.bold()).color(p.fg),
+            text("If two devices are connected to your buds, they may drop one of them.")
+                .size(14)
+                .color(p.dim),
+        ]
+        .spacing(8);
+        let buttons = row![
+            space::horizontal(),
+            ui::pill(look, "Cancel", false, Message::ConfirmDual(false)),
+            ui::pill(look, "Turn off", true, Message::ConfirmDual(true)),
+        ]
+        .spacing(10);
+        let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
+        let backdrop = container(container(dialog).width(460))
             .center(Length::Fill)
             .style(|_| container::Style {
                 background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
@@ -1994,7 +2042,7 @@ mod tests {
     #[test]
     fn ringing_needs_a_yes() {
         let mut app = app();
-        press(&mut app, "4 j Enter");
+        press(&mut app, "4 j j Enter");
         assert_eq!(app.page, Page::Earbuds);
         assert!(app.confirm_find);
         press(&mut app, "Esc");
@@ -2179,6 +2227,32 @@ mod tests {
     }
 
     #[test]
+    fn dual_connection_asks_before_going_off() {
+        let mut app = app();
+        press(&mut app, "4 j");
+        assert_eq!(app.focus(), Some(Item::Switch("dual")), "first on Earbud settings");
+        press(&mut app, "Enter");
+        assert!(app.confirm_dual);
+        press(&mut app, "Esc");
+        assert!(!app.confirm_dual);
+        assert!(switch(&app, "dual"));
+        press(&mut app, "Enter Enter");
+        assert!(!switch(&app, "dual"));
+        // Turning it on asks nothing.
+        press(&mut app, "Enter");
+        assert!(!app.confirm_dual);
+        assert!(switch(&app, "dual"));
+
+        let (mut app, commands) = live();
+        let _ = commands.try_recv();
+        let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
+        let _ = app.update(Message::Switch("dual", false));
+        assert!(commands.try_recv().is_err());
+        let _ = app.update(Message::ConfirmDual(true));
+        assert!(matches!(commands.try_recv(), Ok(Command::Switch("dual", false))));
+    }
+
+    #[test]
     fn steps() {
         let abc = ['a', 'b', 'c'];
         assert_eq!(step(&abc, Some(0), Action::Left), None);
@@ -2235,7 +2309,7 @@ mod tests {
         shots.push(("equalizer-cursor".to_owned(), 1100.0, editing));
         shots.push(("equalizer-pencil".to_owned(), 800.0, on(Page::Equalizer, "j j j j j j")));
         shots.push(("gestures-cursor".to_owned(), 1000.0, on(Page::Gestures, "j j")));
-        shots.push(("find-confirm".to_owned(), 800.0, on(Page::Earbuds, "j Enter")));
+        shots.push(("find-confirm".to_owned(), 800.0, on(Page::Earbuds, "j j Enter")));
         shots.push((
             "overview-bass".to_owned(),
             1340.0,
@@ -2247,6 +2321,9 @@ mod tests {
         let _ = naming.update(Message::SubmitName);
         shots.push(("name-prompt".to_owned(), 800.0, naming));
         shots.push(("equalizer-builtin".to_owned(), 1000.0, on(Page::Equalizer, "j l")));
+        let mut dual = on(Page::Earbuds, "j");
+        let _ = dual.update(Message::Switch("dual", false));
+        shots.push(("dual-confirm".to_owned(), 800.0, dual));
         let mut deleting = on(Page::Equalizer, "");
         let _ = deleting.update(Message::DeletePreset(4));
         shots.push(("delete-confirm".to_owned(), 800.0, deleting));

@@ -262,7 +262,7 @@ fn more<'a>(look: Look, buds: &Buds, focus: Option<Item>) -> Element<'a, Message
             let subtitle = match page {
                 Page::Equalizer => buds.eq_name(),
                 Page::Gestures => "Taps and holds on each bud".to_owned(),
-                _ => "Find my earbuds, firmware".to_owned(),
+                _ => "Dual connection, find my earbuds, firmware".to_owned(),
             };
             ui::setting(
                 look,
