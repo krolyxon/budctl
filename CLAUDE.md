@@ -137,6 +137,13 @@ Exit codes:
 - Keep the encode/decode logic pure and covered by tests, so most changes can be verified without hardware.
 - Before adding a feature, check the spec says the T310 supports it. The protocol family covers many models, and not every command applies to this one. The T310's command bitmap (spec §5) is the authority: never send a command whose bit is off.
 
+## Releases
+
+- One version for the whole workspace (`Cargo.toml`), with a section per release in `CHANGELOG.md`.
+- To release: bump the version, add its `CHANGELOG.md` section, commit, then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag matches `Cargo.toml`, runs the tests, builds x86_64 and aarch64 on Ubuntu 22.04 (glibc builds; Wayland is loaded at runtime), and publishes the tarballs, their `.sha256` files and `install.sh`, with that changelog section as the notes.
+- `install.sh` installs into `~/.local` by default: from a release download (`curl … | sh`), from the unpacked tarball it sits in, or from a checkout with `--source`. `--uninstall` removes the binaries and the launcher entry, never the user's config or log.
+- `.github/workflows/ci.yml` runs fmt, clippy and the tests on every push to master.
+
 ## License
 
 GPL-3.0-or-later (`LICENSE`). Rule 2 forbids copying other projects' code.

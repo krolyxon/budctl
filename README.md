@@ -15,13 +15,23 @@ touch controls, battery and more. There is a command-line tool, `budctl`, and a 
 
 ## Install
 
-You need Rust 1.88 or newer, BlueZ, and for the desktop app a Wayland desktop.
+You need Linux with BlueZ, and for the desktop app a Wayland desktop. Release builds are for
+x86_64 and aarch64 (glibc 2.35 or newer).
 
 ```sh
-cargo install --path crates/budctl-cli    # budctl
-cargo install --path crates/budctl-gui    # budctl-gui
-cp contrib/budctl.desktop ~/.local/share/applications/
+curl -fsSL https://github.com/krolyxon/budctl/releases/latest/download/install.sh | sh
 ```
+
+This puts `budctl` and `budctl-gui` in `~/.local/bin`, and a launcher entry in
+`~/.local/share/applications`. The download is checked against its SHA-256 checksum. Options:
+
+```sh
+sh install.sh --version 0.1.1        # a given release instead of the latest
+sh install.sh --prefix /usr/local    # elsewhere (uses sudo when it must)
+sh install.sh --uninstall            # remove them again; your config and log stay
+```
+
+To build from source instead (Rust 1.88 or newer), run `./install.sh --source` in a checkout.
 
 Pair the buds and connect them in your Bluetooth settings first.
 

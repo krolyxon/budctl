@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "budctl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "budctl-core",
  "clap",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "budctl-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "serde",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "budctl-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "budctl-core",
  "iced",
