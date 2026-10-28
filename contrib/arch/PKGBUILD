@@ -1,0 +1,30 @@
+# Packages the release builds (x86_64 and aarch64) from GitHub. Not on the AUR: build it here with
+#   makepkg -si
+# For a new release, bump pkgver, reset pkgrel to 1, and take the sums from the release's
+# .sha256 files (or run updpkgsums).
+
+pkgname=budctl-bin
+pkgver=0.1.1
+pkgrel=1
+pkgdesc='Control wireless earbuds from Linux without the vendor app (CLI and Wayland GUI)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/krolyxon/budctl'
+license=('GPL-3.0-or-later')
+depends=('glibc' 'gcc-libs' 'bluez')
+optdepends=('wayland: for budctl-gui'
+            'libxkbcommon: for budctl-gui'
+            'fontconfig: budctl-gui uses the desktop sans-serif font')
+provides=('budctl')
+conflicts=('budctl')
+options=('!strip' '!debug')
+source_x86_64=("budctl-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/budctl-x86_64-unknown-linux-gnu.tar.gz")
+source_aarch64=("budctl-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/budctl-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('d05c8a5d3bca2c1878be36ef56acb88dcd7438db0dfdb77da894ff2c9072d0b0')
+sha256sums_aarch64=('f02f56b274d60448fe12f939ee989b166e69ae8bc9e2b17a3b29b3361a85c02d')
+
+package() {
+  cd "budctl-$CARCH-unknown-linux-gnu"
+  install -Dm755 budctl budctl-gui -t "$pkgdir/usr/bin/"
+  install -Dm644 budctl.desktop -t "$pkgdir/usr/share/applications/"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/budctl/"
+}

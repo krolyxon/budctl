@@ -33,6 +33,8 @@ sh install.sh --uninstall            # remove them again; your config and log st
 
 To build from source instead (Rust 1.88 or newer), run `./install.sh --source` in a checkout.
 
+On Arch, `contrib/arch/PKGBUILD` packages the release builds: run `makepkg -si` in that directory.
+
 Pair the buds and connect them in your Bluetooth settings first.
 
 ## Command line
