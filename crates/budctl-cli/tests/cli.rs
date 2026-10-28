@@ -6,7 +6,12 @@
 use std::process::Command;
 
 fn budctl(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_budctl")).args(args).output().unwrap()
+    // Never the real ~/.config: budctl writes a default config there.
+    Command::new(env!("CARGO_BIN_EXE_budctl"))
+        .env("XDG_CONFIG_HOME", env!("CARGO_TARGET_TMPDIR"))
+        .args(args)
+        .output()
+        .unwrap()
 }
 
 #[test]

@@ -27,7 +27,8 @@ pub fn view<'a>(look: Look, colors: Colors<'a>) -> Element<'a, Message> {
     let palette = ui::setting(look, Icon::Settings, "Colors", Some(source), none(), None, false);
     let how = text(
         "budctl follows a matugen palette with Aurora's keys (bg, fg, primary, surface…): the file given \
-         with --theme, else ~/.config/budctl/theme.json. It is read again whenever the window gets focus.",
+         with --theme, else ~/.config/budctl/theme.json, which starts out with the built-in colors. \
+         It is read again whenever the window gets focus.",
     )
     .size(13)
     .color(p.dim);
@@ -37,6 +38,24 @@ pub fn view<'a>(look: Look, colors: Colors<'a>) -> Element<'a, Message> {
         "Keys",
         Some("Vim-like keys work on every page".to_owned()),
         ui::pill(look, "Show keys", false, Message::ShowHelp),
+        None,
+        false,
+    );
+    let files = ui::setting(
+        look,
+        Icon::Settings,
+        "Preferences",
+        Some("~/.config/budctl/config.json: default device, idle time, start page. Read at launch.".to_owned()),
+        none(),
+        None,
+        false,
+    );
+    let log = ui::setting(
+        look,
+        Icon::Info,
+        "Log",
+        Some("~/.local/state/budctl/gui.log: errors and session events, started afresh each launch.".to_owned()),
+        none(),
         None,
         false,
     );
@@ -53,6 +72,7 @@ pub fn view<'a>(look: Look, colors: Colors<'a>) -> Element<'a, Message> {
         ui::title(look, "App settings"),
         column![ui::card(look, vec![palette]), how].spacing(10),
         ui::card(look, vec![keys]),
+        ui::card(look, vec![files, log]),
         ui::card(look, vec![about]),
     ]
     .spacing(18)

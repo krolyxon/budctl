@@ -127,11 +127,42 @@ fn parse_hex(hex: &str) -> Option<Color> {
 
 /// The palette file to follow: `--theme <file>`, else `~/.config/budctl/theme.json`.
 pub fn default_file() -> Option<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")))?;
-    Some(config.join("budctl/theme.json"))
+    budctl_core::config::dir().map(|dir| dir.join("theme.json"))
+}
+
+/// A palette as a palette file, with every key [`parse`] reads: the built-in one is written to
+/// [`default_file`] when there is none, to start a matugen template from.
+pub fn to_json(p: &Palette) -> String {
+    let keys = [
+        ("bg", p.bg),
+        ("fg", p.fg),
+        ("primary", p.accent),
+        ("primaryFg", p.accent_fg),
+        ("primaryContainer", p.accent_dim),
+        ("secondary", p.icon),
+        ("surfaceLow", p.surface_low),
+        ("surface", p.surface),
+        ("surfaceHigh", p.surface_high),
+        ("surfaceHighest", p.surface_highest),
+        ("outlineVariant", p.line),
+        ("surfaceVariantFg", p.dim),
+        ("err", p.err),
+    ];
+    let lines: Vec<String> = keys
+        .iter()
+        .map(|(key, color)| format!("  \"{key}\": \"{}\"", to_hex(*color)))
+        .collect();
+    format!("{{\n{}\n}}\n", lines.join(",\n"))
+}
+
+/// `#rrggbb`, or `#rrggbbaa` when not opaque.
+fn to_hex(color: Color) -> String {
+    let [r, g, b, a] = color.into_rgba8();
+    if a == u8::MAX {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+    }
 }
 
 /// The palette file and the version of it last read, so it is only read again when it changes.
@@ -267,6 +298,16 @@ mod tests {
         assert!(parse(r#"{"bg": "red"}"#).unwrap_err().contains("bg"));
         assert!(parse(r##"{"bg": "#12345"}"##).is_err());
         assert!(parse(r##"{"bg": "#ggggggg"}"##).is_err());
+    }
+
+    #[test]
+    fn the_written_palette_reads_back_the_same() {
+        assert_eq!(parse(&to_json(&BUILT_IN)).unwrap(), BUILT_IN);
+        let see_through = Palette {
+            accent: Color::from_rgba8(0x11, 0x22, 0x33, 0.8),
+            ..BUILT_IN
+        };
+        assert_eq!(parse(&to_json(&see_through)).unwrap(), see_through);
     }
 
     #[test]

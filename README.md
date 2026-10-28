@@ -51,7 +51,8 @@ budctl find stop
 
 - `--json` prints machine-readable output for scripts and status bars (`"schema": 1`).
 - `--debug` hex-dumps every frame sent and received, on stderr.
-- `--device <MAC>` picks the buds when more than one supported pair is connected.
+- `--device <MAC>` picks the buds when more than one supported pair is connected. Without it,
+  `"device"` in the config file (below) is used, if set.
 
 Exit codes:
 
@@ -109,10 +110,34 @@ The cursor shows only after you press a key, and the first key only shows it.
 palette: `--theme <file>`, else `~/.config/budctl/theme.json`. The file is JSON with these keys, all
 optional: `bg`, `fg`, `primary`, `primaryFg`, `primaryContainer`, `secondary`, `surfaceLow`,
 `surface`, `surfaceHigh`, `surfaceHighest`, `outlineVariant`, `surfaceVariantFg`, `err`. It is read
-again whenever the window gets focus, so a new wallpaper's colors show up there too.
+again whenever the window gets focus, so a new wallpaper's colors show up there too. When the file
+is missing, the app writes the built-in colors there: a starting point for a matugen template.
+
+**Log:** each launch writes errors and session events (connected, each change and its answer,
+closed) to `~/.local/state/budctl/gui.log`, replacing the last launch's.
 
 Other options: `--demo` shows made-up buds without Bluetooth; `--debug` and `--device` work as in
 the command-line tool.
+
+## Config
+
+`~/.config/budctl/config.json` is created with the defaults the first time it is needed. Every key
+is optional; a file with a mistake is reported and the defaults are used.
+
+```json
+{
+  "device": null,
+  "gui": {
+    "idle_seconds": 10,
+    "start_page": "overview"
+  }
+}
+```
+
+- `device`: the buds to use when `--device` is not given, as `"AA:BB:CC:DD:EE:FF"`.
+- `gui.idle_seconds`: how long the app keeps the control channel open after the last change
+  (1–600).
+- `gui.start_page`: `overview`, `equalizer`, `gestures`, `earbuds` or `settings`.
 
 ## How it works
 

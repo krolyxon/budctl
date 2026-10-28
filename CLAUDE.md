@@ -10,7 +10,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 - Two front ends, one core: the `budctl` CLI and the `budctl-gui` desktop app, both thin layers over the same library (`budctl-core`). Scripts and the owner's Quickshell (Aurora) can use `budctl --json`.
 - One small, readable codebase that the owner fully understands.
 - Device support is pluggable. Adding a new pair of buds means adding one module under `crates/budctl-core/src/devices/` and registering it in `devices/mod.rs`, without touching transport, CLI or GUI code.
-- Coexist with the phone app. Settings live on the buds, so budctl never stores device state locally beyond user config.
+- Coexist with the phone app. Settings live on the buds, so budctl never stores device state locally beyond user config (`~/.config/budctl/config.json`, `budctl_core::config`: default device and GUI preferences, created with defaults when missing; a broken file is reported and the defaults are used).
 
 ## Non-goals
 
@@ -43,7 +43,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 - CLI: `clap` (derive). It is parsed with `try_parse`, so usage errors exit 1, not clap's default 2. `serde_json` provides `--json`.
 - Tests: `cargo test --workspace`. Lints: `cargo clippy --workspace --all-targets -- -D warnings`.
 - Keep dependencies minimal. Every new dependency needs a reason in the commit message. The current direct dependencies:
-  - core: `libc`, `zbus`, `serde`
+  - core: `libc`, `zbus`, `serde`, `serde_json` (config file)
   - cli: `clap`, `serde_json`
   - gui: `iced`, `serde`, `serde_json`; `iced_test` for tests
 
@@ -121,7 +121,8 @@ Exit codes:
   - `h`/`l` pick the previous or next choice, or turn a switch off or on, and `l` opens a row's page. Enter and Space toggle, step round the choices, or open.
   - `J`/`K`, `Ctrl+Tab`, `gt`/`gT` and `1`–`5` change pages. `Esc` hides the cursor, `q` quits.
   - The cursor shows only after a key press, and the first key only shows it, so nothing changes where it cannot be seen. A click hides it.
-- **Buds:** `worker.rs` owns the session, on a thread of its own, and answers each command with one event, in order. It opens the session when a command needs it, answers the buds' own requests while it waits (`Session::serve`), and closes it 10 s after the last command. A write shows "Saving…" until the buds' read-back arrives, and takes no second write meanwhile. A failure says why, with "Try again". `--demo` shows made-up buds; `--debug` hex-dumps frames like the CLI.
+- **Buds:** `worker.rs` owns the session, on a thread of its own, and answers each command with one event, in order. It opens the session when a command needs it, answers the buds' own requests while it waits (`Session::serve`), and closes it 10 s after the last command (`gui.idle_seconds` in the config). A write shows "Saving…" until the buds' read-back arrives, and takes no second write meanwhile. A failure says why, with "Try again". `--demo` shows made-up buds; `--debug` hex-dumps frames like the CLI.
+- **Files:** writes the built-in palette to `~/.config/budctl/theme.json` when missing (never overwrites it), and logs errors and session events to `~/.local/state/budctl/gui.log` (`log.rs`), replaced each launch. Frames stay on stderr with `--debug`. The CLI logs to stderr only, since status bars run it every few seconds.
 - **Logic:** keys and clicks both become messages for one `update` function, which stays testable without a display. `iced_test` renders pages to PNG, so the look can be checked without the owner.
 - **Screenshots:** the README's come from the demo buds: `cargo test -p budctl-gui readme_screenshots -- --ignored` renders them again into `docs/screenshots/`.
 

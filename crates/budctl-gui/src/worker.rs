@@ -19,8 +19,10 @@ use budctl_core::{Error, Kind, Result};
 use iced::futures::channel::mpsc as channel;
 use iced::futures::{SinkExt, Stream, StreamExt};
 
-/// How long the session stays open after the last command.
-const IDLE: Duration = Duration::from_secs(10);
+use crate::log;
+
+/// How long the session stays open after the last command, unless the config says otherwise.
+pub const IDLE: Duration = Duration::from_secs(10);
 /// How often an open session answers the buds while it waits for a command.
 const SERVE_EVERY: Duration = Duration::from_millis(100);
 
@@ -104,16 +106,15 @@ pub struct Reading {
 }
 
 /// The worker, as a stream of events for an iced subscription. `device` picks the buds, as
-/// `budctl --device` does.
-pub fn run(device: &Option<BdAddr>) -> impl Stream<Item = Event> + use<> {
-    let device = *device;
+/// `budctl --device` does; `idle` is how long a session stays open after the last command.
+pub fn run(&(device, idle): &(Option<BdAddr>, Duration)) -> impl Stream<Item = Event> + use<> {
     iced::stream::channel(16, async move |mut output: channel::Sender<Event>| {
         let (commands, inbox) = mpsc::channel();
         let (events, mut outbox) = channel::unbounded();
         if output.send(Event::Ready(commands)).await.is_err() {
             return;
         }
-        let worker = Worker::new(bluetooth(device), events, IDLE);
+        let worker = Worker::new(bluetooth(device), events, idle);
         let started = thread::Builder::new()
             .name("budctl-buds".to_owned())
             .spawn(move || worker.run(&inbox));
@@ -193,19 +194,20 @@ impl Worker {
         };
         if self.last_command.elapsed() >= self.idle {
             self.session = None;
+            let message = format!("session closed after {} s without a command", self.idle.as_secs());
             if budctl_core::debug::enabled() {
-                eprintln!(
-                    "#        session closed after {} s without a command",
-                    self.idle.as_secs()
-                );
+                eprintln!("#        {message}");
             }
+            log::line(message);
         } else if let Err(error) = session.serve() {
             self.session = None;
+            log::line(format!("link lost: {error}"));
             self.send(Event::Lost(error.to_string()));
         }
     }
 
     fn handle(&mut self, command: Command) {
+        log::line(format!("{command:?}"));
         let answer = match command {
             Command::Read => self.read().map(|reading| Event::Read(Box::new(reading))),
             Command::Noise(mode) => self
@@ -262,8 +264,12 @@ impl Worker {
             }
         };
         match answer {
-            Ok(event) => self.send(event),
+            Ok(event) => {
+                log::line("  done");
+                self.send(event);
+            }
             Err(error) => {
+                log::line(format!("  failed ({:?}): {error}", error.kind()));
                 self.session = None;
                 self.send(Event::Failed {
                     kind: error.kind(),
@@ -301,10 +307,12 @@ impl Worker {
     fn session(&mut self) -> Result<&mut Box<dyn Session>> {
         if self.session.is_none() {
             let events = self.events.clone();
-            let found = move |name| {
+            let found = move |name: String| {
+                log::line(format!("  connecting to {name}"));
                 let _ = events.unbounded_send(Event::Found(name));
             };
             self.session = Some((self.connect)(&found)?);
+            log::line("  session open");
         }
         self.session
             .as_mut()

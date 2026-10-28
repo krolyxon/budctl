@@ -17,7 +17,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[derive(Parser)]
 #[command(name = "budctl", version)]
 struct Cli {
-    /// The buds to use, when more than one supported pair is paired.
+    /// The buds to use, when more than one supported pair is paired. Default: "device" in
+    /// ~/.config/budctl/config.json.
     #[arg(long, global = true, value_name = "MAC")]
     device: Option<BdAddr>,
 
@@ -247,6 +248,16 @@ fn main() -> ExitCode {
     }
 }
 
+/// The config's default device. A config that cannot be used is reported and left out, so it
+/// never stops a command.
+fn default_device() -> Option<BdAddr> {
+    let (config, problem) = budctl_core::config::load();
+    if let Some(problem) = problem {
+        eprintln!("budctl: {problem}; ignoring it");
+    }
+    config.device().unwrap_or_default()
+}
+
 fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
     // Checked before connecting: ringing is loud. Spec: realme_t310.md#find
     if let Command::Find {
@@ -264,7 +275,7 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
         return output::list(out, &found, cli.json);
     }
 
-    let (device, model) = budctl_core::select(found, cli.device)?;
+    let (device, model) = budctl_core::select(found, cli.device.or_else(default_device))?;
     let mut session = budctl_core::connect(&device, model)?;
     match cli.command {
         Command::List => Ok(()),

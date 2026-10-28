@@ -7,6 +7,7 @@
 
 pub mod bluez;
 pub mod bt;
+pub mod config;
 pub mod debug;
 pub mod devices;
 mod error;

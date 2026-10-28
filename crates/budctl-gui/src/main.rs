@@ -10,6 +10,7 @@ mod equalizer;
 mod gestures;
 mod icons;
 mod keys;
+mod log;
 mod overview;
 mod settings;
 mod theme;
@@ -40,8 +41,11 @@ const USAGE: &str = "usage: budctl-gui [--device <MAC>] [--theme <palette.json>]
 --device picks the buds when more than one supported pair is connected.
 --demo shows made-up buds, without Bluetooth.
 --debug hex-dumps every frame sent and received on stderr, as budctl --debug does.
-Colors come from --theme, else from ~/.config/budctl/theme.json if it exists, else built in.
-The palette file takes the keys of a matugen palette like Aurora's (bg, fg, primary, …).
+Colors come from --theme, else from ~/.config/budctl/theme.json, else built in. That file is
+written with the built-in colors when missing. It takes the keys of a matugen palette like
+Aurora's (bg, fg, primary, …).
+Preferences (default device, idle time, start page): ~/.config/budctl/config.json.
+Each launch logs errors and session events to ~/.local/state/budctl/gui.log.
 Press ? in the window for the keys.";
 
 /// The page's scrolling area, so the cursor can be kept in view.
@@ -68,9 +72,32 @@ fn main() -> ExitCode {
     if options.debug {
         budctl_core::debug::enable();
     }
+    if let Some(file) = log::file()
+        && let Err(e) = log::start(&file)
+    {
+        eprintln!("budctl-gui: cannot write the log {}: {e}", file.display());
+    }
+    let config = load_config();
+    let start_page = Page::named(&config.gui.start_page).unwrap_or_else(|| {
+        warn(format!(
+            "gui.start_page: no page {:?}; opening Overview",
+            config.gui.start_page
+        ));
+        Page::Overview
+    });
+    let idle = Duration::from_secs(config.gui.idle_seconds);
+    let device = options.device.or_else(|| config.device().unwrap_or_default());
+    if options.theme.is_none() {
+        write_built_in_theme();
+    }
     let theme_file = options.theme.clone().or_else(theme::default_file);
     let font = theme::system_font();
-    let boot = move || App::new(theme_file.clone(), font, options.device, options.demo);
+    let boot = move || {
+        let mut app = App::new(theme_file.clone(), font, device, options.demo);
+        app.page = start_page;
+        app.idle = idle;
+        app
+    };
     let result = iced::application(boot, App::update, App::view)
         .title("budctl")
         .theme(App::theme)
@@ -92,6 +119,35 @@ fn main() -> ExitCode {
             eprintln!("budctl-gui: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// A problem worth knowing that does not stop the window: on stderr and in the log.
+fn warn(message: String) {
+    eprintln!("budctl-gui: {message}");
+    log::line(message);
+}
+
+/// The config, with the defaults when it cannot be used.
+fn load_config() -> budctl_core::config::Config {
+    let (config, problem) = budctl_core::config::load();
+    match problem {
+        Some(problem) => warn(format!("{problem}; using the defaults")),
+        None => log::line(format!("config: {config:?}")),
+    }
+    config
+}
+
+/// Write the built-in colors to `~/.config/budctl/theme.json` when there is no such file, as a
+/// start for a matugen template.
+fn write_built_in_theme() {
+    let Some(file) = theme::default_file() else {
+        return;
+    };
+    match budctl_core::config::create(&file, &theme::to_json(&theme::BUILT_IN)) {
+        Ok(()) => log::line(format!("wrote the built-in colors to {}", file.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => warn(format!("cannot write {}: {e}", file.display())),
     }
 }
 
@@ -161,6 +217,18 @@ impl Page {
             Page::Gestures => Icon::Gestures,
             Page::Earbuds => Icon::Earbud,
             Page::Settings => Icon::Settings,
+        }
+    }
+
+    /// A page by its name in the config: `overview`, `equalizer`, `gestures`, `earbuds`, `settings`.
+    fn named(name: &str) -> Option<Page> {
+        match name {
+            "overview" => Some(Page::Overview),
+            "equalizer" => Some(Page::Equalizer),
+            "gestures" => Some(Page::Gestures),
+            "earbuds" => Some(Page::Earbuds),
+            "settings" => Some(Page::Settings),
+            _ => None,
         }
     }
 
@@ -340,8 +408,10 @@ struct App {
     cursor_shown: bool,
     /// Whether the list of keys is open.
     help: bool,
-    /// `--device`, for the worker.
+    /// `--device`, else the config's, for the worker.
     device: Option<BdAddr>,
+    /// How long the worker keeps an idle session open.
+    idle: Duration,
     link: Link,
     /// Where commands go, once the worker is up.
     worker: Option<Sender<Command>>,
@@ -397,6 +467,7 @@ impl App {
             cursor_shown: false,
             help: false,
             device,
+            idle: worker::IDLE,
             link: if demo { Link::Demo } else { Link::Connecting },
             worker: None,
             in_flight: VecDeque::new(),
@@ -1186,7 +1257,7 @@ impl App {
                 palette
             }
             Some(Err(e)) => {
-                eprintln!("budctl-gui: {e}; using the built-in colors");
+                warn(format!("{e}; using the built-in colors"));
                 self.palette_problem = Some(e);
                 theme::BUILT_IN
             }
@@ -1211,7 +1282,7 @@ impl App {
         if self.link == Link::Demo {
             return events;
         }
-        let worker = Subscription::run_with(self.device, worker::run).map(Message::Worker);
+        let worker = Subscription::run_with((self.device, self.idle), worker::run).map(Message::Worker);
         Subscription::batch([events, worker])
     }
 
