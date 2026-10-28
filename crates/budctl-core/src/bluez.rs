@@ -1,6 +1,6 @@
 //! Paired devices, from BlueZ over the system D-Bus.
 //!
-//! The only use of D-Bus in budctl is listing paired devices (CLAUDE.md, hard rule 1). budctl
+//! The only use of D-Bus in budctl is listing paired devices. budctl
 //! connects to the system bus socket at its fixed path itself, so no environment variable can
 //! point the connection anywhere else (such as a TCP address).
 

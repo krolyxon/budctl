@@ -3,8 +3,7 @@
 //! A front end (CLI, GUI) calls [`scan`], picks a device with [`select`], opens a session with
 //! [`connect`] and then reads or changes settings through [`devices::Session`].
 //!
-//! No network: the only sockets are Bluetooth sockets and the local system D-Bus (BlueZ).
-//! See CLAUDE.md, hard rule 1.
+//! No telemetry: the only sockets are Bluetooth sockets and the local system D-Bus (BlueZ).
 
 pub mod bluez;
 pub mod bt;

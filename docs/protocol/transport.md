@@ -12,7 +12,7 @@ All of this is public, standard material:
 <a id="paired-devices"></a>
 ## 1. Paired devices (BlueZ over D-Bus)
 
-- **Connection.** budctl talks to BlueZ only over the **system bus**. The D-Bus specification gives its default address as `unix:path=/var/run/dbus/system_bus_socket`. budctl connects to that path itself and hands the stream to zbus. It never reads `DBUS_SYSTEM_BUS_ADDRESS`, which could name a TCP address (CLAUDE.md rule 1).
+- **Connection.** budctl talks to BlueZ only over the **system bus**. The D-Bus specification gives its default address as `unix:path=/var/run/dbus/system_bus_socket`. budctl connects to that path itself and hands the stream to zbus. It never reads `DBUS_SYSTEM_BUS_ADDRESS`, which could name a TCP address.
 - **Listing devices.** Call `org.freedesktop.DBus.ObjectManager.GetManagedObjects` on service `org.bluez`, path `/`. Each object that has the interface `org.bluez.Device1` is a known device.
 - **Device1 properties used:**
 

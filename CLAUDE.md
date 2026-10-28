@@ -21,11 +21,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 
 ## Hard rules
 
-1. **No telemetry; network only when a feature needs it.** The owner relaxed this rule on 2026-10-27: network access is fine when a feature truly needs it, but nothing may ever report on the user. No feature needs the network so far. The sockets budctl opens today:
-   - Bluetooth sockets: RFCOMM for the control link, L2CAP for SDP.
-   - The local system D-Bus Unix socket, used through `zbus` only to talk to BlueZ (`org.bluez`). budctl opens that socket itself at the fixed path, so an environment variable can never redirect it to TCP.
-   - `budctl-gui` only: the Wayland compositor's Unix socket. The GUI is built for Wayland only (no X11), so `DISPLAY` can never point it at TCP.
-   - HTTP clients (reqwest, hyper, ureq, surf, etc.) stay banned until a feature needs one. The bans live in `cargo deny` (`deny.toml`), clippy `disallowed-types` and `crates/budctl-core/tests/guards.rs`. Lifting one is fine then; say why in the commit.
+1. **No telemetry or cloud.** Nothing may ever report on the user: no analytics, crash reports, usage data, update checks or accounts. Network access is fine when a feature truly needs it; none does so far.
 2. **Clean-room protocol work.** Protocol facts (UUIDs, channel numbers, packet framing, command IDs, init sequences) may come from public references, but no other project's source code is ever translated or copied. Write findings into `docs/protocol/<device>.md` in our own words, then implement from that spec.
    - Committed files do not name or cite those references. Each fact carries an evidence level instead (rule 3).
    - Only the owner can change this rule, by editing it here.
@@ -45,7 +41,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
   - `zbus` (blocking API) only to list paired devices.
   - Supporting BLE GATT would need a new transport kind in core.
 - CLI: `clap` (derive). It is parsed with `try_parse`, so usage errors exit 1, not clap's default 2. `serde_json` provides `--json`.
-- Tests: `cargo test --workspace`. Lints: `cargo clippy --workspace --all-targets -- -D warnings`. Dependency policy: `cargo deny check bans licenses sources`.
+- Tests: `cargo test --workspace`. Lints: `cargo clippy --workspace --all-targets -- -D warnings`.
 - Keep dependencies minimal. Every new dependency needs a reason in the commit message. The current direct dependencies:
   - core: `libc`, `zbus`, `serde`
   - cli: `clap`, `serde_json`

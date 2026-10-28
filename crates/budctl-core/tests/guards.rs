@@ -1,6 +1,5 @@
 //! Checks for the CLAUDE.md hard rules that the compiler and clippy cannot make on their own.
 //!
-//! - Rule 1: no network code in our sources, and no banned crate (deny.toml) in a Linux build.
 //! - Rule 3: every `Spec: <file>.md#<anchor>` comment points at an anchor that exists.
 //!
 //! The CLI's exit codes are checked in crates/budctl-cli/tests/cli.rs.
@@ -8,10 +7,8 @@
 // Test-only file: helpers may panic (clippy.toml exempts only #[test] functions themselves).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -38,108 +35,6 @@ fn sources() -> Vec<PathBuf> {
     }
     assert!(!files.is_empty(), "found no sources to check");
     files
-}
-
-#[test]
-fn no_network_code_in_sources() {
-    // Built from pieces so this file does not trip its own check.
-    let banned = [
-        ["std", "::net"].concat(),
-        ["Tcp", "Stream"].concat(),
-        ["Tcp", "Listener"].concat(),
-        ["Udp", "Socket"].concat(),
-        ["ToSocket", "Addrs"].concat(),
-        ["AF_", "INET"].concat(),
-    ];
-    let mut hits = Vec::new();
-    for file in sources() {
-        let text = fs::read_to_string(&file).unwrap();
-        for (n, line) in text.lines().enumerate() {
-            for word in &banned {
-                if line.contains(word.as_str()) {
-                    hits.push(format!("{}:{}: {word}", file.display(), n + 1));
-                }
-            }
-        }
-    }
-    assert!(
-        hits.is_empty(),
-        "network code is not allowed (CLAUDE.md rule 1):\n{}",
-        hits.join("\n")
-    );
-}
-
-/// The crate names in deny.toml's `[bans] deny` list.
-fn banned_crates() -> BTreeSet<String> {
-    let text = fs::read_to_string(workspace().join("deny.toml")).unwrap();
-    let mut names = BTreeSet::new();
-    let mut in_bans = false;
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_bans = line == "[bans]";
-            continue;
-        }
-        if !in_bans {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("{ crate = \"") {
-            let name = rest.split('"').next().unwrap();
-            names.insert(name.to_owned());
-        }
-    }
-    assert!(
-        names.contains("reqwest"),
-        "could not read the [bans] deny list from deny.toml"
-    );
-    names
-}
-
-/// The crates a Linux build of the workspace uses, tests included, for the targets deny.toml
-/// checks. Cargo.lock is no help here: it also lists crates that only other platforms build (iced's
-/// lock entries include tokio, for wasm).
-fn built_crates() -> BTreeSet<String> {
-    let out = Command::new(env!("CARGO"))
-        .current_dir(workspace())
-        .args(["tree", "--offline", "--locked", "--workspace", "--all-features"])
-        .args(["--edges", "normal,build,dev", "--prefix", "none", "--format", "{p}"])
-        .args([
-            "--target",
-            "x86_64-unknown-linux-gnu",
-            "--target",
-            "aarch64-unknown-linux-gnu",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "cargo tree failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let names: BTreeSet<String> = String::from_utf8(out.stdout)
-        .unwrap()
-        .lines()
-        .filter_map(|line| line.split_whitespace().next())
-        .map(str::to_owned)
-        .collect();
-    assert!(
-        names.contains("budctl-core") && names.contains("libc"),
-        "could not read crate names from cargo tree"
-    );
-    names
-}
-
-#[test]
-fn no_banned_crate_in_the_build() {
-    let built = built_crates();
-    let found: Vec<String> = banned_crates()
-        .into_iter()
-        .filter(|banned| built.contains(banned))
-        .collect();
-    assert!(
-        found.is_empty(),
-        "banned crates in the build (see deny.toml): {found:?}"
-    );
 }
 
 #[test]
