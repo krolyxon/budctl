@@ -4,7 +4,7 @@ use std::fmt;
 
 use budctl_core::status::TouchControls;
 use iced::widget::overlay::menu;
-use iced::widget::{column, pick_list, text};
+use iced::widget::{column, pick_list};
 use iced::{Border, Element, Shadow};
 
 use crate::buds::{self, Buds};
@@ -56,11 +56,9 @@ pub fn items(buds: &Buds) -> Vec<Item> {
 /// `draft`: an action picked on the screen and not on the buds yet.
 pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a TouchDraft>, marks: Marks) -> Element<'a, Message> {
     let p = look.p;
-    let title = ui::title(look, "Gestures");
+    let title = ui::title(look, "gestures · taps and holds on each bud");
     let Some(touch) = &buds.touch else {
-        let none = text("These buds did not report their touch controls.")
-            .size(14)
-            .color(p.dim);
+        let none = ui::note(look, "These buds did not report their touch controls.");
         return column![title, none].spacing(12).into();
     };
     let rows = rows(touch);
@@ -85,30 +83,28 @@ pub fn view<'a>(look: Look, buds: &'a Buds, draft: Option<&'a TouchDraft>, marks
                         save: true,
                     }
                 })
-                .width(220)
-                .padding([8, 12])
+                .width(230)
+                .padding([10, 18])
                 .text_size(14)
-                .style(move |_, _| pick_list::Style {
+                .font(look.medium())
+                .style(move |_, status| pick_list::Style {
                     text_color: p.fg,
-                    placeholder_color: p.dim,
-                    handle_color: p.dim,
-                    background: p.surface_high.into(),
-                    border: Border {
-                        color: p.line,
-                        width: 1.0,
-                        radius: 10.0.into(),
-                    },
+                    placeholder_color: p.grey,
+                    handle_color: p.grey,
+                    background: if matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened { .. }) {
+                        p.mute
+                    } else {
+                        p.s2
+                    }
+                    .into(),
+                    border: Border::default().rounded(999),
                 })
                 .menu_style(move |_| menu::Style {
-                    background: p.surface_high.into(),
-                    border: Border {
-                        color: p.line,
-                        width: 1.0,
-                        radius: 10.0.into(),
-                    },
+                    background: p.s2.into(),
+                    border: Border::default().rounded(20),
                     text_color: p.fg,
-                    selected_text_color: p.accent_fg,
-                    selected_background: p.accent.into(),
+                    selected_text_color: p.fill_fg,
+                    selected_background: p.fill.into(),
                     shadow: Shadow::default(),
                 });
                 let saving = marks.pending.contains(&Item::Gesture(n)).then(|| SAVING.to_owned());

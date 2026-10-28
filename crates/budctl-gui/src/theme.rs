@@ -1,112 +1,116 @@
-//! Colors and fonts. The colors are a built-in dark palette, or one read from a matugen JSON file.
+//! Colors and fonts: Nothing OS's shapes and type, in Material You colors.
 //!
-//! The file uses the keys of the owner's Aurora palette (`bg`, `fg`, `primary`…), so
-//! `~/.cache/matugen/aurora.json` works as it is, and the keys map to the same roles as in Aurora's
-//! `Theme.qml`, plus `secondary` for icons. A key the file lacks keeps its built-in color.
+//! The colors are a built-in palette (near-black, white "on" states, one red for live things), or
+//! one read from a matugen JSON file. The file uses the keys of the owner's Aurora palette
+//! (`~/.cache/matugen/aurora.json`: Material 3 roles, `on_x` spelled `xFg`), so that file works as
+//! it is, and the roles map as in Aurora's `Theme.qml`. A key the file lacks keeps its built-in
+//! color. The fonts ship inside the binary (`fonts/`, OFL).
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::SystemTime;
 
-use iced::font::Weight;
+use iced::font::{Family, Weight};
 use iced::{Color, Font};
-use serde::Deserialize;
 
-/// The colors the UI uses, by role.
+/// The colors the UI uses, by role: a ladder of surfaces, and the "on" states on top.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
-    /// Window background.
+    /// Window background (`surfaceLowest`).
     pub bg: Color,
-    /// Text.
+    /// Cards and dialogs (`surfaceLow`).
+    pub s1: Color,
+    /// Icon circles, tracks, inputs, the switches' and pills' "off" fill (`surfaceHigh`).
+    pub s2: Color,
+    /// Unlit dots, hovered rows (`surfaceHighest`).
+    pub s3: Color,
+    /// Inactive things: the pages not open, an off switch's knob (`outlineVariant`).
+    pub mute: Color,
+    /// Caps labels (`outline`).
+    pub grey: Color,
+    /// Text (`surfaceFg`).
     pub fg: Color,
-    /// Secondary text, and icons at rest.
-    pub dim: Color,
-    /// What is on or selected: switches, the noise-control pill, battery rings.
-    pub accent: Color,
-    /// Icons and small marks on cards and the sidebar. matugen's `primary` (Aurora's key) is a
-    /// container color, too dark to draw thin lines with on a dark card.
-    pub icon: Color,
-    /// Text and icons on `accent`.
-    pub accent_fg: Color,
-    /// A quiet accent: the open page in the sidebar.
-    pub accent_dim: Color,
-    /// The sidebar.
-    pub surface_low: Color,
-    /// Cards.
-    pub surface: Color,
-    /// Hovered rows, and switches when off.
-    pub surface_high: Color,
-    /// Battery ring tracks.
-    pub surface_highest: Color,
-    /// Card borders and separators.
-    pub line: Color,
+    /// Secondary text (`surfaceVariantFg`).
+    pub fg_dim: Color,
+    /// What is on or selected: switches, the chosen segment, lit dots, the cursor (`primary`).
+    pub fill: Color,
+    /// Text and icons on `fill` (`primaryFg`).
+    pub fill_fg: Color,
+    /// Tonal emphasis: text selection (`primaryContainer`).
+    pub container: Color,
+    pub container_fg: Color,
+    /// Live things, one at a time: the open page's dot, "Saving…", ringing, charging (`tertiary`).
+    pub live: Color,
+    pub live_fg: Color,
     pub err: Color,
-    /// "Connected". matugen has no such role, so it stays green.
-    pub ok: Color,
+    pub err_fg: Color,
 }
 
-/// Dark, with a red accent.
+/// Near-black surfaces, white "on" states and a red for live things.
 pub const BUILT_IN: Palette = Palette {
-    bg: Color::from_rgb8(0x12, 0x12, 0x14),
-    fg: Color::from_rgb8(0xEE, 0xEE, 0xF1),
-    dim: Color::from_rgb8(0x9C, 0x9C, 0xA6),
-    accent: Color::from_rgb8(0xE0, 0x30, 0x2E),
-    icon: Color::from_rgb8(0xE0, 0x30, 0x2E),
-    accent_fg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
-    accent_dim: Color::from_rgb8(0x3A, 0x1A, 0x1C),
-    surface_low: Color::from_rgb8(0x17, 0x17, 0x1A),
-    surface: Color::from_rgb8(0x1E, 0x1E, 0x22),
-    surface_high: Color::from_rgb8(0x29, 0x29, 0x2E),
-    surface_highest: Color::from_rgb8(0x33, 0x33, 0x39),
-    line: Color::from_rgb8(0x2D, 0x2D, 0x33),
+    bg: Color::from_rgb8(0x00, 0x00, 0x00),
+    s1: Color::from_rgb8(0x11, 0x11, 0x12),
+    s2: Color::from_rgb8(0x1C, 0x1C, 0x1E),
+    s3: Color::from_rgb8(0x2A, 0x2A, 0x2D),
+    mute: Color::from_rgb8(0x45, 0x45, 0x49),
+    grey: Color::from_rgb8(0x8E, 0x8E, 0x93),
+    fg: Color::from_rgb8(0xF2, 0xF2, 0xF2),
+    fg_dim: Color::from_rgb8(0xB8, 0xB8, 0xBC),
+    fill: Color::from_rgb8(0xF2, 0xF2, 0xF2),
+    fill_fg: Color::from_rgb8(0x00, 0x00, 0x00),
+    container: Color::from_rgb8(0x3A, 0x3A, 0x3E),
+    container_fg: Color::from_rgb8(0xF2, 0xF2, 0xF2),
+    live: Color::from_rgb8(0xD7, 0x19, 0x21),
+    live_fg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
     err: Color::from_rgb8(0xFF, 0xB4, 0xAB),
-    ok: Color::from_rgb8(0x4C, 0xC3, 0x6A),
+    err_fg: Color::from_rgb8(0x69, 0x00, 0x05),
 };
 
-/// The palette file's keys. Other keys (`image`, `secondary`…) are ignored.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PaletteFile {
-    bg: Option<String>,
-    fg: Option<String>,
-    primary: Option<String>,
-    primary_fg: Option<String>,
-    primary_container: Option<String>,
-    secondary: Option<String>,
-    surface_low: Option<String>,
-    surface: Option<String>,
-    surface_high: Option<String>,
-    surface_highest: Option<String>,
-    outline_variant: Option<String>,
-    surface_variant_fg: Option<String>,
-    err: Option<String>,
-}
+/// Where in the palette a key's color goes.
+type Role = fn(&mut Palette) -> &mut Color;
+
+/// The palette file's keys, with each role's key and where it goes. `bg` and `fg` are the older
+/// names of `surfaceLowest` and `surfaceFg`, still read. Other keys (`image`, `secondary`…) are
+/// ignored.
+const KEYS: [(&str, Option<&str>, Role); 16] = [
+    ("surfaceLowest", Some("bg"), |p| &mut p.bg),
+    ("surfaceLow", None, |p| &mut p.s1),
+    ("surfaceHigh", None, |p| &mut p.s2),
+    ("surfaceHighest", None, |p| &mut p.s3),
+    ("outlineVariant", None, |p| &mut p.mute),
+    ("outline", None, |p| &mut p.grey),
+    ("surfaceFg", Some("fg"), |p| &mut p.fg),
+    ("surfaceVariantFg", None, |p| &mut p.fg_dim),
+    ("primary", None, |p| &mut p.fill),
+    ("primaryFg", None, |p| &mut p.fill_fg),
+    ("primaryContainer", None, |p| &mut p.container),
+    ("primaryContainerFg", None, |p| &mut p.container_fg),
+    ("tertiary", None, |p| &mut p.live),
+    ("tertiaryFg", None, |p| &mut p.live_fg),
+    ("err", None, |p| &mut p.err),
+    ("errFg", None, |p| &mut p.err_fg),
+];
 
 /// A palette from the text of a palette file.
 pub fn parse(json: &str) -> Result<Palette, String> {
-    let file: PaletteFile = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let pick = |key: &str, value: Option<String>, default: Color| match value {
-        None => Ok(default),
-        Some(hex) => parse_hex(&hex).ok_or_else(|| format!("{key}: \"{hex}\" is not a #rrggbb color")),
-    };
-    let b = BUILT_IN;
-    Ok(Palette {
-        bg: pick("bg", file.bg, b.bg)?,
-        fg: pick("fg", file.fg, b.fg)?,
-        dim: pick("surfaceVariantFg", file.surface_variant_fg, b.dim)?,
-        accent: pick("primary", file.primary, b.accent)?,
-        icon: pick("secondary", file.secondary, b.icon)?,
-        accent_fg: pick("primaryFg", file.primary_fg, b.accent_fg)?,
-        accent_dim: pick("primaryContainer", file.primary_container, b.accent_dim)?,
-        surface_low: pick("surfaceLow", file.surface_low, b.surface_low)?,
-        surface: pick("surface", file.surface, b.surface)?,
-        surface_high: pick("surfaceHigh", file.surface_high, b.surface_high)?,
-        surface_highest: pick("surfaceHighest", file.surface_highest, b.surface_highest)?,
-        line: pick("outlineVariant", file.outline_variant, b.line)?,
-        err: pick("err", file.err, b.err)?,
-        ok: b.ok,
-    })
+    let file: HashMap<String, serde_json::Value> = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let mut palette = BUILT_IN;
+    for (key, old, role) in KEYS {
+        let found = [Some(key), old]
+            .into_iter()
+            .flatten()
+            .find_map(|name| file.get(name).map(|value| (name, value)));
+        let Some((name, value)) = found else {
+            continue;
+        };
+        let color = value
+            .as_str()
+            .and_then(parse_hex)
+            .ok_or_else(|| format!("{name}: {value} is not a #rrggbb color"))?;
+        *role(&mut palette) = color;
+    }
+    Ok(palette)
 }
 
 /// `#rrggbb` or `#rrggbbaa`.
@@ -133,24 +137,10 @@ pub fn default_file() -> Option<PathBuf> {
 /// A palette as a palette file, with every key [`parse`] reads: the built-in one is written to
 /// [`default_file`] when there is none, to start a matugen template from.
 pub fn to_json(p: &Palette) -> String {
-    let keys = [
-        ("bg", p.bg),
-        ("fg", p.fg),
-        ("primary", p.accent),
-        ("primaryFg", p.accent_fg),
-        ("primaryContainer", p.accent_dim),
-        ("secondary", p.icon),
-        ("surfaceLow", p.surface_low),
-        ("surface", p.surface),
-        ("surfaceHigh", p.surface_high),
-        ("surfaceHighest", p.surface_highest),
-        ("outlineVariant", p.line),
-        ("surfaceVariantFg", p.dim),
-        ("err", p.err),
-    ];
-    let lines: Vec<String> = keys
+    let mut p = *p;
+    let lines: Vec<String> = KEYS
         .iter()
-        .map(|(key, color)| format!("  \"{key}\": \"{}\"", to_hex(*color)))
+        .map(|(key, _, role)| format!("  \"{key}\": \"{}\"", to_hex(*role(&mut p))))
         .collect();
     format!("{{\n{}\n}}\n", lines.join(",\n"))
 }
@@ -202,43 +192,53 @@ impl Source {
     }
 }
 
+/// The fonts the binary carries, to load at start.
+pub const FONTS: [&[u8]; 5] = [
+    include_bytes!("../fonts/SpaceGrotesk-Regular.otf"),
+    include_bytes!("../fonts/SpaceGrotesk-Medium.otf"),
+    include_bytes!("../fonts/SpaceGrotesk-SemiBold.otf"),
+    include_bytes!("../fonts/SpaceMono-Regular.ttf"),
+    include_bytes!("../fonts/DotoRounded-Black.ttf"),
+];
+
+/// UI text: titles semibold, body regular.
+pub const UI: Font = Font::with_name("Space Grotesk");
+/// Caps labels.
+const MONO: Font = Font::with_name("Space Mono");
+/// Numbers and short words, as round LED dots. Never under 26 px.
+const DOT: Font = Font {
+    family: Family::Name("Doto Rounded"),
+    weight: Weight::Black,
+    ..Font::DEFAULT
+};
+
 /// The palette and the fonts, handed to everything that draws.
 #[derive(Debug, Clone, Copy)]
 pub struct Look {
     pub p: Palette,
-    pub font: Font,
 }
 
 impl Look {
     pub fn medium(self) -> Font {
         Font {
             weight: Weight::Medium,
-            ..self.font
+            ..UI
         }
     }
 
-    pub fn bold(self) -> Font {
+    pub fn semibold(self) -> Font {
         Font {
-            weight: Weight::Bold,
-            ..self.font
+            weight: Weight::Semibold,
+            ..UI
         }
     }
-}
 
-/// The desktop's sans-serif font, as fontconfig names it. iced's own default is a font many
-/// systems lack.
-pub fn system_font() -> Font {
-    let family = Command::new("fc-match")
-        .args(["--format", "%{family[0]}", "sans-serif"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
-        .filter(|name| !name.is_empty());
-    match family {
-        // Font names are &'static; this runs once.
-        Some(name) => Font::with_name(Box::leak(name.into_boxed_str())),
-        None => Font::DEFAULT,
+    pub fn mono(self) -> Font {
+        MONO
+    }
+
+    pub fn dot(self) -> Font {
+        DOT
     }
 }
 
@@ -249,9 +249,9 @@ pub fn iced_theme(p: &Palette) -> iced::Theme {
         iced::theme::Palette {
             background: p.bg,
             text: p.fg,
-            primary: p.accent,
-            success: p.ok,
-            warning: p.accent,
+            primary: p.fill,
+            success: p.fill,
+            warning: p.live,
             danger: p.err,
         },
     )
@@ -266,28 +266,40 @@ mod tests {
         let palette = parse(
             r##"{
                 "image": "/some/wallpaper.jpg",
-                "bg": "#0f0c0a", "fg": "#ebe0dc",
-                "primary": "#7b4b2f", "primaryFg": "#fffaff", "primaryContainer": "#5c3823",
-                "secondary": "#e2bfae",
-                "surfaceLow": "#181311", "surface": "#1e1815", "surfaceHigh": "#2a211d",
-                "surfaceHighest": "#362a26", "outline": "#9f8d85", "outlineVariant": "#52443d",
-                "surfaceVariantFg": "#d6c3b9", "err": "#ffb4ab"
+                "primary": "#d7c2be", "primaryFg": "#3b2d2b", "primaryContainer": "#52433f",
+                "primaryContainerFg": "#f4ddd9", "secondary": "#d0c4c2",
+                "tertiary": "#e0c38c", "tertiaryFg": "#3f2e04",
+                "surfaceLowest": "#0f0e0e", "surfaceLow": "#1d1b1b", "surfaceContainer": "#211f1f",
+                "surfaceHigh": "#2c2929", "surfaceHighest": "#373434", "surfaceFg": "#e7e1e0",
+                "surfaceVariantFg": "#d2c3c1", "outline": "#9b8e8c", "outlineVariant": "#4e4443",
+                "err": "#ffb4ab", "errFg": "#690005"
             }"##,
         )
         .unwrap();
-        assert_eq!(palette.bg, Color::from_rgb8(0x0f, 0x0c, 0x0a));
-        assert_eq!(palette.accent, Color::from_rgb8(0x7b, 0x4b, 0x2f));
-        assert_eq!(palette.accent_dim, Color::from_rgb8(0x5c, 0x38, 0x23));
-        assert_eq!(palette.icon, Color::from_rgb8(0xe2, 0xbf, 0xae));
-        assert_eq!(palette.line, Color::from_rgb8(0x52, 0x44, 0x3d));
-        assert_eq!(palette.dim, Color::from_rgb8(0xd6, 0xc3, 0xb9));
-        assert_eq!(palette.ok, BUILT_IN.ok);
+        assert_eq!(palette.bg, Color::from_rgb8(0x0f, 0x0e, 0x0e));
+        assert_eq!(palette.s1, Color::from_rgb8(0x1d, 0x1b, 0x1b));
+        assert_eq!(palette.s3, Color::from_rgb8(0x37, 0x34, 0x34));
+        assert_eq!(palette.fill, Color::from_rgb8(0xd7, 0xc2, 0xbe));
+        assert_eq!(palette.live, Color::from_rgb8(0xe0, 0xc3, 0x8c));
+        assert_eq!(palette.grey, Color::from_rgb8(0x9b, 0x8e, 0x8c));
+        assert_eq!(palette.mute, Color::from_rgb8(0x4e, 0x44, 0x43));
+        assert_eq!(palette.err_fg, Color::from_rgb8(0x69, 0x00, 0x05));
+    }
+
+    #[test]
+    fn reads_the_older_names() {
+        let palette = parse(r##"{"bg": "#0f0e0e", "fg": "#e7e1e0", "surface": "#211f1f"}"##).unwrap();
+        assert_eq!(palette.bg, Color::from_rgb8(0x0f, 0x0e, 0x0e));
+        assert_eq!(palette.fg, Color::from_rgb8(0xe7, 0xe1, 0xe0));
+        // The newer name wins.
+        let both = parse(r##"{"bg": "#000001", "surfaceLowest": "#000002"}"##).unwrap();
+        assert_eq!(both.bg, Color::from_rgb8(0, 0, 2));
     }
 
     #[test]
     fn missing_keys_keep_the_built_in_colors() {
         let palette = parse(r##"{"primary": "#112233cc"}"##).unwrap();
-        assert_eq!(palette.accent, Color::from_rgba8(0x11, 0x22, 0x33, 0.8));
+        assert_eq!(palette.fill, Color::from_rgba8(0x11, 0x22, 0x33, 0.8));
         assert_eq!(palette.bg, BUILT_IN.bg);
         assert_eq!(parse("{}").unwrap(), BUILT_IN);
     }
@@ -296,6 +308,7 @@ mod tests {
     fn bad_files_are_errors() {
         assert!(parse("not json").is_err());
         assert!(parse(r#"{"bg": "red"}"#).unwrap_err().contains("bg"));
+        assert!(parse(r#"{"primary": 3}"#).unwrap_err().contains("primary"));
         assert!(parse(r##"{"bg": "#12345"}"##).is_err());
         assert!(parse(r##"{"bg": "#ggggggg"}"##).is_err());
     }
@@ -304,7 +317,7 @@ mod tests {
     fn the_written_palette_reads_back_the_same() {
         assert_eq!(parse(&to_json(&BUILT_IN)).unwrap(), BUILT_IN);
         let see_through = Palette {
-            accent: Color::from_rgba8(0x11, 0x22, 0x33, 0.8),
+            fill: Color::from_rgba8(0x11, 0x22, 0x33, 0.8),
             ..BUILT_IN
         };
         assert_eq!(parse(&to_json(&see_through)).unwrap(), see_through);

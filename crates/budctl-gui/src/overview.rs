@@ -1,13 +1,13 @@
 //! The Overview page: battery, noise control, the switches, and the way to the other pages.
 
 use budctl_core::status::{AncLevel, Charge, NoiseMode, Switch};
-use iced::alignment::Horizontal;
-use iced::widget::{column, container, row, slider, text};
-use iced::{Alignment, Border, Element, Length};
+use iced::widget::{column, container, row, stack};
+use iced::{Alignment, Element, Length};
 
 use crate::buds::Buds;
+use crate::dots;
 use crate::equalizer;
-use crate::icons::{self, Icon, Part, RingColors};
+use crate::icons::{self, Icon};
 use crate::theme::Look;
 use crate::ui::{self, Segment};
 use crate::{Item, Marks, Message, Page};
@@ -45,58 +45,52 @@ pub fn view<'a>(
     bass: Option<i8>,
     marks: Marks,
 ) -> Element<'a, Message> {
-    column![ui::title(look, "Overview"), battery(look, buds)]
-        .push(
-            buds.status
-                .noise_control
-                .as_ref()
-                .map(|now| noise_control(look, &now.mode, anc_level, marks)),
-        )
-        .push(switches(look, buds, bass, marks))
-        .push(more(look, buds, marks.focus))
-        .spacing(18)
-        .into()
+    column![
+        ui::title(look, "overview · battery, noise control, sound"),
+        battery(look, buds)
+    ]
+    .push(
+        buds.status
+            .noise_control
+            .as_ref()
+            .map(|now| noise_control(look, &now.mode, anc_level, marks)),
+    )
+    .push(switches(look, buds, bass, marks))
+    .push(more(look, buds, marks.focus))
+    .spacing(18)
+    .into()
 }
 
 fn battery<'a>(look: Look, buds: &Buds) -> Element<'a, Message> {
     let p = look.p;
-    let colors = RingColors {
-        track: p.surface_highest,
-        charge: p.accent,
-        part: p.fg,
-        tip: p.dim,
-        cutout: p.surface,
-    };
-    let gauge = |part, label: &'a str, charge: Option<Charge>| -> Element<'a, Message> {
-        let reading = match charge {
-            Some(charge) => format!("{}%", charge.level),
-            None => "—".to_owned(),
+    let gauge = |label: &str, charge: Option<Charge>| -> Element<'a, Message> {
+        let figure = match charge {
+            Some(charge) => ui::num(look, &charge.level.to_string(), 44.0, p.fg),
+            None => ui::num(look, "--", 44.0, p.mute),
         };
-        let figure = row![text(reading).size(21).font(look.bold()).color(p.fg)]
-            .push(
-                charge
-                    .filter(|c| c.charging)
-                    .map(|_| icons::icon(Icon::Bolt, 16.0, p.icon)),
-            )
-            .spacing(4)
+        let ring = stack![
+            dots::ring(charge.map(|c| f32::from(c.level) / 100.0), 150.0, p.fill, p.s3),
+            container(figure).center(150),
+        ];
+        let charging = charge.is_some_and(|c| c.charging);
+        let caption = row![ui::label(look, label, 11.0, p.grey)]
+            .push(charging.then(|| icons::icon(Icon::Bolt, 14.0, p.live)))
+            .push(charging.then(|| ui::label(look, "charging", 11.0, p.live)))
+            .spacing(6)
             .align_y(Alignment::Center);
-        column![
-            icons::battery_ring(part, charge.map(|c| c.level), 112.0, colors),
-            figure,
-            text(label).size(13).color(p.dim)
-        ]
-        .spacing(6)
-        .align_x(Alignment::Center)
-        .width(Length::Fill)
-        .into()
+        column![ring, caption]
+            .spacing(14)
+            .align_x(Alignment::Center)
+            .width(Length::Fill)
+            .into()
     };
     let battery = buds.status.battery;
     let gauges = row![
-        gauge(Part::Left, "Left", battery.left),
-        gauge(Part::Case, "Case", battery.case),
-        gauge(Part::Right, "Right", battery.right),
+        gauge("left", battery.left),
+        gauge("case", battery.case),
+        gauge("right", battery.right),
     ];
-    ui::card(look, vec![container(gauges).padding([22, 8]).into()])
+    ui::card(look, vec![container(gauges).padding([26, 8]).into()])
 }
 
 fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel, marks: Marks) -> Element<'a, Message> {
@@ -129,15 +123,15 @@ fn noise_control<'a>(look: Look, mode: &str, anc_level: AncLevel, marks: Marks) 
     })
     .collect();
     let strength = row![
-        text("Strength").size(13.5).color(look.p.dim).width(Length::Fill),
-        container(ui::segmented(look, levels, false, focus == Some(Item::AncLevel))).width(300)
+        container(ui::label(look, "strength", 11.0, look.p.grey)).width(Length::Fill),
+        container(ui::segmented(look, levels, false, focus == Some(Item::AncLevel))).width(340)
     ]
     .align_y(Alignment::Center)
-    .padding([0, 8]);
+    .padding([0, 18]);
     let saving = marks
         .pending
         .contains(&Item::NoiseMode)
-        .then(|| container(text(SAVING).size(13).color(look.p.icon)).center_x(Length::Fill));
+        .then(|| container(ui::label(look, SAVING, 11.0, look.p.live)).center_x(Length::Fill));
     column![ui::segmented(look, segments, true, focus == Some(Item::NoiseMode))]
         .push(saving)
         .push((mode == NoiseMode::Anc(anc_level).name()).then_some(strength))
@@ -202,41 +196,23 @@ fn bass_level<'a>(look: Look, (low, high): (i8, i8), level: Option<i8>, marks: M
     } else {
         "Last set here: the buds do not report it"
     };
-    let shown = level.map_or_else(|| "Not set".to_owned(), equalizer::gain);
-    let slider = slider(
-        i16::from(low)..=i16::from(high),
-        i16::from(level.unwrap_or(0)),
-        |level| Message::Bass {
+    let shown = level.map_or_else(|| "not set".to_owned(), equalizer::gain);
+    let slider = dots::Slider {
+        low: i16::from(low),
+        high: i16::from(high),
+        value: i16::from(level.unwrap_or(0)),
+        vertical: false,
+        change: |level, save| Message::Bass {
             level: i8::try_from(level).unwrap_or(0),
-            save: false,
+            save,
         },
-    )
-    .on_release(Message::SaveBass)
-    .width(200)
-    .style(move |_, _| slider::Style {
-        rail: slider::Rail {
-            backgrounds: (p.accent.into(), p.surface_highest.into()),
-            width: 6.0,
-            border: Border::default().rounded(3),
-        },
-        handle: slider::Handle {
-            shape: slider::HandleShape::Circle { radius: 9.0 },
-            background: p.fg.into(),
-            border_width: 2.0,
-            border_color: p.accent,
-        },
-    });
-    let control = row![
-        text(shown)
-            .size(14)
-            .font(look.medium())
-            .color(p.dim)
-            .width(64)
-            .align_x(Horizontal::Right),
-        slider
-    ]
-    .spacing(14)
-    .align_y(Alignment::Center);
+        release: Message::SaveBass,
+        on: p.fill,
+        off: p.s3,
+    };
+    let control = row![container(ui::value(look, &shown)).align_right(76), slider.view(200.0)]
+        .spacing(14)
+        .align_y(Alignment::Center);
     ui::setting(
         look,
         Icon::Bass,

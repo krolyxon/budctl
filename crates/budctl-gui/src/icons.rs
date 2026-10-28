@@ -1,14 +1,11 @@
-//! Icons and battery rings, drawn as vector paths so they take any theme color and stay sharp at
+//! Icons, drawn as vector paths so they take any theme color and stay sharp at
 //! any scale. Icons are designed on a 24 × 24 grid.
-
-use std::f32::consts::{FRAC_PI_2, TAU};
 
 use iced::widget::canvas::{self, Frame, LineCap, LineJoin, Path, Stroke, path::Arc};
 use iced::{Color, Element, Point, Radians, Rectangle, Renderer, Size, Theme, mouse};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
-    Overview,
     Equalizer,
     Gestures,
     Earbud,
@@ -23,7 +20,6 @@ pub enum Icon {
     Dual,
     Chevron,
     Bolt,
-    Check,
     Find,
     Info,
     Chip,
@@ -163,11 +159,6 @@ impl<'f> Pen<'f> {
 
 fn draw_icon(pen: &mut Pen, icon: Icon) {
     match icon {
-        Icon::Overview => {
-            for (x, y) in [(3.0, 3.0), (13.5, 3.0), (3.0, 13.5), (13.5, 13.5)] {
-                pen.rect(x, y, 7.5, 7.5, 2.0);
-            }
-        }
         Icon::Equalizer => {
             for (x, knob) in [(6.0, 14.0), (12.0, 8.0), (18.0, 16.0)] {
                 pen.line((x, 3.5), (x, 20.5));
@@ -179,7 +170,7 @@ fn draw_icon(pen: &mut Pen, icon: Icon) {
             pen.arc(12.0, 11.5, 4.0, 200.0, 340.0);
             pen.arc(12.0, 11.5, 7.5, 210.0, 330.0);
         }
-        Icon::Earbud => earbud(pen, false, None),
+        Icon::Earbud => earbud(pen),
         Icon::Settings => {
             for (y, knob) in [(6.0, 15.0), (12.0, 8.0), (18.0, 13.0)] {
                 pen.line((3.5, y), (20.5, y));
@@ -292,7 +283,6 @@ fn draw_icon(pen: &mut Pen, icon: Icon) {
             }
             pen.line((8.0, 14.0), (16.0, 14.0));
         }
-        Icon::Check => pen.polyline(&[(4.5, 12.5), (9.5, 17.5), (19.5, 7.0)], false),
         Icon::Laptop => {
             pen.rect(4.0, 5.0, 16.0, 11.0, 1.5);
             pen.line((2.0, 19.0), (22.0, 19.0));
@@ -304,106 +294,9 @@ fn draw_icon(pen: &mut Pen, icon: Icon) {
     }
 }
 
-/// A filled earbud: the head, the ear tip pointing in, and the stem going down. The tip is
-/// drawn in `tip`, or in the part's color when there is none.
-fn earbud(pen: &mut Pen, mirrored: bool, tip: Option<Color>) {
-    let x = |x: f32, w: f32| if mirrored { 24.0 - x - w } else { x };
-    let color = pen.color;
-    pen.color = tip.unwrap_or(color);
-    pen.fill_rect(x(14.5, 6.0), 5.0, 6.0, 7.0, 2.8);
-    pen.color = color;
-    pen.dot(x(11.0, 0.0), 8.5, 6.3);
-    pen.fill_rect(x(6.6, 4.4), 10.0, 4.4, 12.5, 2.2);
-}
-
-/// What a battery ring shows in its middle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Part {
-    Left,
-    Right,
-    Case,
-}
-
-/// A battery ring: the track, an arc for the charge (none when unknown) and the part in the
-/// middle.
-pub fn battery_ring<'a, Message: 'a>(
-    part: Part,
-    level: Option<u8>,
-    size: f32,
-    colors: RingColors,
-) -> Element<'a, Message> {
-    iced::widget::canvas(Ring { part, level, colors })
-        .width(size)
-        .height(size)
-        .into()
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct RingColors {
-    pub track: Color,
-    pub charge: Color,
-    pub part: Color,
-    /// The earbuds' ear tips.
-    pub tip: Color,
-    /// Details cut into the case (the lid line, the light).
-    pub cutout: Color,
-}
-
-struct Ring {
-    part: Part,
-    level: Option<u8>,
-    colors: RingColors,
-}
-
-impl<Message> canvas::Program<Message> for Ring {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let center = frame.center();
-        let width = bounds.width * 0.06;
-        let radius = bounds.width / 2.0 - width / 2.0 - 1.0;
-        let ring = |color: Color| {
-            Stroke::default()
-                .with_color(color)
-                .with_width(width)
-                .with_line_cap(LineCap::Round)
-        };
-        frame.stroke(&Path::circle(center, radius), ring(self.colors.track));
-        if let Some(level) = self.level.filter(|&level| level > 0) {
-            let sweep = f32::from(level.min(100)) / 100.0 * TAU;
-            let arc = Path::new(|b| {
-                b.arc(Arc {
-                    center,
-                    radius,
-                    start_angle: Radians(-FRAC_PI_2),
-                    end_angle: Radians(-FRAC_PI_2 + sweep),
-                });
-            });
-            frame.stroke(&arc, ring(self.colors.charge));
-        }
-
-        let art = bounds.width * 0.44;
-        let origin = Point::new(center.x - art / 2.0, center.y - art / 2.0);
-        let mut pen = Pen::new(&mut frame, origin, art, self.colors.part);
-        match self.part {
-            Part::Left => earbud(&mut pen, false, Some(self.colors.tip)),
-            Part::Right => earbud(&mut pen, true, Some(self.colors.tip)),
-            Part::Case => {
-                pen.fill_rect(2.0, 5.5, 20.0, 13.5, 6.0);
-                pen.color = self.colors.cutout;
-                pen.width = 0.9 * pen.scale;
-                pen.line((2.0, 10.0), (22.0, 10.0));
-                pen.dot(12.0, 14.5, 1.0);
-            }
-        }
-        vec![frame.into_geometry()]
-    }
+/// A filled earbud: the head, the ear tip pointing in, and the stem going down.
+fn earbud(pen: &mut Pen) {
+    pen.fill_rect(14.5, 5.0, 6.0, 7.0, 2.8);
+    pen.dot(11.0, 8.5, 6.3);
+    pen.fill_rect(6.6, 10.0, 4.4, 12.5, 2.2);
 }

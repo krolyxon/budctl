@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `budctl-gui` has a new look, after Nothing OS in Material You colors, like the owner's Aurora
+  shell: dot-matrix page names and battery figures (Doto), LED battery rings, dotted sliders for
+  the bass level and the EQ bands (drag, or the mouse wheel), pill switches, tracks and chips,
+  Space Grotesk and Space Mono text. The fonts are built in (SIL OFL 1.1, `OFL-fonts.txt` in the
+  release archive).
+- The palette file takes Aurora's Material 3 keys (`primary`, `tertiary`, `surfaceLow`,
+  `outline`…), so `~/.cache/matugen/aurora.json` works as it is. `bg` and `fg` are still read;
+  `surface` and `secondary` are no longer used.
+
 ## 0.1.1 (2026-10-28)
 
 The first release, with builds for x86_64 and aarch64 Linux and an install script.

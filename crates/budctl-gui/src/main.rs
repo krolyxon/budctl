@@ -5,6 +5,7 @@
 //! (`keys.rs`). `--demo` shows made-up buds instead.
 
 mod buds;
+mod dots;
 mod earbuds;
 mod equalizer;
 mod gestures;
@@ -29,9 +30,8 @@ use budctl_core::status::{AncLevel, EqBand, EqPreset, NoiseControl, NoiseMode, S
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::operation::{self, RelativeOffset};
 use iced::widget::{Column, column, container, mouse_area, opaque, row, scrollable, space, stack, text, text_input};
-use iced::{Alignment, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme, event, mouse, window};
+use iced::{Alignment, Border, Element, Length, Size, Subscription, Task, Theme, event, mouse, window};
 
-use icons::Icon;
 use keys::Action;
 use theme::Look;
 use worker::{Command, Event, Reading};
@@ -42,8 +42,8 @@ const USAGE: &str = "usage: budctl-gui [--device <MAC>] [--theme <palette.json>]
 --demo shows made-up buds, without Bluetooth.
 --debug hex-dumps every frame sent and received on stderr, as budctl --debug does.
 Colors come from --theme, else from ~/.config/budctl/theme.json, else built in. That file is
-written with the built-in colors when missing. It takes the keys of a matugen palette like
-Aurora's (bg, fg, primary, …).
+written with the built-in colors when missing. It takes the Material 3 keys of a matugen
+palette like Aurora's (primary, tertiary, surfaceLow, outline, …).
 Preferences (default device, idle time, start page): ~/.config/budctl/config.json.
 Each launch logs errors and session events to ~/.local/state/budctl/gui.log.
 Press ? in the window for the keys.";
@@ -91,18 +91,21 @@ fn main() -> ExitCode {
         write_built_in_theme();
     }
     let theme_file = options.theme.clone().or_else(theme::default_file);
-    let font = theme::system_font();
     let boot = move || {
-        let mut app = App::new(theme_file.clone(), font, device, options.demo);
+        let mut app = App::new(theme_file.clone(), device, options.demo);
         app.page = start_page;
         app.idle = idle;
         app
     };
-    let result = iced::application(boot, App::update, App::view)
+    let mut application = iced::application(boot, App::update, App::view);
+    for font in theme::FONTS {
+        application = application.font(font);
+    }
+    let result = application
         .title("budctl")
         .theme(App::theme)
         .subscription(App::subscription)
-        .default_font(font)
+        .default_font(theme::UI)
         .window(window::Settings {
             size: Size::new(1040.0, 800.0),
             min_size: Some(Size::new(760.0, 540.0)),
@@ -210,13 +213,14 @@ impl Page {
         }
     }
 
-    fn icon(self) -> Icon {
+    /// The page's word in the sidebar, short enough to stand large in dots.
+    fn word(self) -> &'static str {
         match self {
-            Page::Overview => Icon::Overview,
-            Page::Equalizer => Icon::Equalizer,
-            Page::Gestures => Icon::Gestures,
-            Page::Earbuds => Icon::Earbud,
-            Page::Settings => Icon::Settings,
+            Page::Overview => "overview",
+            Page::Equalizer => "eq",
+            Page::Gestures => "gestures",
+            Page::Earbuds => "buds",
+            Page::Settings => "app",
         }
     }
 
@@ -443,7 +447,7 @@ struct App {
 }
 
 impl App {
-    fn new(theme_file: Option<PathBuf>, font: Font, device: Option<BdAddr>, demo: bool) -> Self {
+    fn new(theme_file: Option<PathBuf>, device: Option<BdAddr>, demo: bool) -> Self {
         let buds = if demo { buds::demo() } else { buds::unknown() };
         let anc_level = buds
             .status
@@ -456,10 +460,7 @@ impl App {
             page: Page::Overview,
             buds,
             anc_level,
-            look: Look {
-                p: theme::BUILT_IN,
-                font,
-            },
+            look: Look { p: theme::BUILT_IN },
             theme: theme::iced_theme(&theme::BUILT_IN),
             palette: theme::Source::new(theme_file),
             keys: keys::Keys::default(),
@@ -1328,17 +1329,17 @@ impl App {
             }
             page => column![
                 ui::title(look, page.title()),
-                text("This page comes in a later step.").size(14).color(look.p.dim)
+                container(ui::note(look, "Connect your buds to see this page.")).padding([0, 18])
             ]
-            .spacing(12)
+            .spacing(16)
             .into(),
         };
-        let page = column![self.problem(), page].spacing(18);
+        let page = column![self.problem(), page].spacing(20);
         let p = look.p;
         let content = scrollable(
             container(container(page).max_width(860))
                 .center_x(Length::Fill)
-                .padding([30, 36]),
+                .padding([34, 36]),
         )
         .id(SCROLL)
         .height(Length::Fill)
@@ -1347,12 +1348,18 @@ impl App {
             for rail in [&mut style.vertical_rail, &mut style.horizontal_rail] {
                 rail.background = None;
                 rail.border = Border::default();
-                rail.scroller.background = p.surface_highest.into();
+                rail.scroller.background = p.s3.into();
                 rail.scroller.border = Border::default().rounded(4);
             }
             style
         });
-        let window = row![self.sidebar(), ui::divider(look), content];
+        let window = container(row![self.sidebar(), content])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(p.bg.into()),
+                ..container::Style::default()
+            });
         if self.help {
             stack![window, self.help()].into()
         } else if self.confirm_find {
@@ -1387,18 +1394,24 @@ impl App {
                 "budctl looks for the paired buds it supports and reads them.",
             ),
         };
-        let retry = matches!(self.link, Link::Failed { .. })
-            .then(|| container(ui::outline_button(look, "Try again", Message::Refresh)).width(180));
+        let failed = matches!(self.link, Link::Failed { .. });
+        let retry = failed.then(|| container(ui::wide_button(look, "Try again", Message::Refresh)).width(180));
+        let state = if failed {
+            row![ui::dot(p.err, 10.0), ui::label(look, "no link", 11.0, p.err)]
+        } else {
+            row![ui::dot(p.live, 10.0), ui::label(look, "searching", 11.0, p.live)]
+        };
         let words = column![
-            text(headline).size(20).font(look.bold()).color(p.fg),
-            text(detail).size(14).color(p.dim)
+            state.spacing(10).align_y(Alignment::Center),
+            ui::headline(look, headline),
+            ui::note(look, detail)
         ]
-        .spacing(8);
+        .spacing(10);
         column![
-            ui::title(look, "Overview"),
-            ui::panel(look, column![words].push(retry).spacing(18).into())
+            ui::title(look, "overview · battery, noise control, sound"),
+            ui::panel(look, column![words].push(retry).spacing(22).into())
         ]
-        .spacing(18)
+        .spacing(20)
         .into()
     }
 
@@ -1412,22 +1425,19 @@ impl App {
         let look = self.look;
         let p = look.p;
         let content = row![
-            text(message.as_str()).size(14).color(p.err).width(Length::Fill),
-            container(ui::outline_button(look, "Try again", Message::Refresh)).width(140)
+            ui::dot(p.err, 10.0),
+            container(text(message.as_str()).size(14).color(p.err)).width(Length::Fill),
+            container(ui::wide_button(look, "Try again", Message::Refresh)).width(150)
         ]
-        .spacing(16)
+        .spacing(14)
         .align_y(Alignment::Center);
         Some(
             container(content)
-                .padding([12, 16])
+                .padding([12, 22])
                 .width(Length::Fill)
                 .style(move |_| container::Style {
-                    background: Some(p.surface.into()),
-                    border: Border {
-                        color: p.err,
-                        width: 1.0,
-                        radius: 14.0.into(),
-                    },
+                    background: Some(p.s1.into()),
+                    border: Border::default().rounded(999),
                     ..container::Style::default()
                 })
                 .into(),
@@ -1438,138 +1448,89 @@ impl App {
         let look = self.look;
         let p = look.p;
         let (light, state) = match &self.link {
-            Link::Demo | Link::Live => (p.ok, "Connected"),
-            Link::Connecting => (p.dim, "Connecting…"),
-            Link::Failed { kind: Kind::Busy, .. } => (p.err, "Busy"),
-            Link::Failed { .. } if !self.buds.connected => (p.dim, "Not connected"),
-            Link::Failed { .. } => (p.err, "Error"),
+            Link::Demo | Link::Live => (p.fill, "connected"),
+            Link::Connecting => (p.live, "connecting…"),
+            Link::Failed { kind: Kind::Busy, .. } => (p.err, "busy"),
+            Link::Failed { .. } if !self.buds.connected => (p.mute, "not connected"),
+            Link::Failed { .. } => (p.err, "error"),
         };
-        let device = container(
-            column![
-                text(self.buds.name.as_str()).size(16).font(look.bold()).color(p.fg),
-                row![ui::light(light), text(state).size(13).color(p.dim), space::horizontal()]
-                    .push((self.link == Link::Demo).then(|| ui::tag(look, "demo")))
-                    .spacing(8)
-                    .align_y(Alignment::Center),
-                ui::outline_button(look, "Refresh", Message::Refresh),
+        let device = column![
+            text(self.buds.name.as_str()).size(18).font(look.semibold()).color(p.fg),
+            row![
+                ui::dot(light, 8.0),
+                ui::label(look, state, 11.0, p.grey),
+                space::horizontal()
             ]
-            .spacing(12),
-        )
-        .padding(16)
-        .style(move |_| container::Style {
-            background: Some(p.surface.into()),
-            border: Border {
-                color: p.line,
-                width: 1.0,
-                radius: 18.0.into(),
-            },
-            ..container::Style::default()
+            .push((self.link == Link::Demo).then(|| ui::tag(look, "demo")))
+            .spacing(8)
+            .align_y(Alignment::Center),
+            ui::wide_button(look, "Refresh", Message::Refresh),
+        ]
+        .spacing(14)
+        .padding([0, 10]);
+        let pages = Page::ALL.into_iter().fold(Column::new().spacing(2), |pages, page| {
+            pages.push(ui::nav_item(look, page.word(), page == self.page, Message::Open(page)))
         });
-        let pages = Page::ALL.into_iter().fold(Column::new().spacing(3), |pages, page| {
-            pages.push(ui::nav_item(
-                look,
-                page.icon(),
-                page.title(),
-                page == self.page,
-                Message::Open(page),
-            ))
-        });
-        let hint = text("Press ? for keys").size(12.5).color(p.dim);
-        container(column![device, pages, space::vertical(), hint].spacing(22))
-            .padding([18, 14])
-            .width(268)
+        let hint = container(ui::label(look, "? keys · q quit", 10.5, p.grey)).padding([0, 10]);
+        container(column![device, pages, space::vertical(), hint].spacing(34))
+            .padding([34, 18])
+            .width(272)
             .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(p.surface_low.into()),
-                ..container::Style::default()
-            })
             .into()
     }
 
-    /// "Ring the buds?", over a dimmed window: the sound is loud enough to hurt in the ears.
+    /// A dialog over the dimmed window: heading, words, and Cancel beside the main action.
+    fn dialog<'a>(
+        &self,
+        heading: String,
+        words: &'a str,
+        answer: fn(bool) -> Message,
+        action: &'a str,
+    ) -> Element<'a, Message> {
+        let look = self.look;
+        let buttons = row![
+            space::horizontal(),
+            ui::pill(look, "Cancel", false, answer(false)),
+            ui::pill(look, action, true, answer(true)),
+        ]
+        .spacing(10);
+        let body = column![ui::headline(look, heading), ui::note(look, words)].spacing(10);
+        let dialog = ui::panel(look, column![body, buttons].spacing(26).into());
+        opaque(ui::scrim(look, dialog, 480.0))
+    }
+
+    /// "Ring the buds?": the sound is loud enough to hurt in the ears.
     fn confirm_find(&self) -> Element<'_, Message> {
-        let look = self.look;
-        let p = look.p;
-        let words = column![
-            text("Ring your buds?").size(22).font(look.bold()).color(p.fg),
-            text("Take them out of your ears first: the sound is loud. They ring until you press Stop.")
-                .size(14)
-                .color(p.dim),
-        ]
-        .spacing(8);
-        let buttons = row![
-            space::horizontal(),
-            ui::pill(look, "Cancel", false, Message::ConfirmFind(false)),
-            ui::pill(look, "Ring", true, Message::ConfirmFind(true)),
-        ]
-        .spacing(10);
-        let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
-        let backdrop = container(container(dialog).width(480))
-            .center(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
-                ..container::Style::default()
-            });
-        opaque(backdrop)
+        self.dialog(
+            "Ring your buds?".to_owned(),
+            "Take them out of your ears first: the sound is loud. They ring until you press Stop.",
+            Message::ConfirmFind,
+            "Ring",
+        )
     }
 
-    /// "Turn dual connection off?", over a dimmed window: with two devices connected, the buds may
-    /// drop one.
+    /// "Turn dual connection off?": with two devices connected, the buds may drop one.
     fn confirm_dual(&self) -> Element<'_, Message> {
-        let look = self.look;
-        let p = look.p;
-        let words = column![
-            text("Turn dual connection off?").size(22).font(look.bold()).color(p.fg),
-            text("If two devices are connected to your buds, they may drop one of them.")
-                .size(14)
-                .color(p.dim),
-        ]
-        .spacing(8);
-        let buttons = row![
-            space::horizontal(),
-            ui::pill(look, "Cancel", false, Message::ConfirmDual(false)),
-            ui::pill(look, "Turn off", true, Message::ConfirmDual(true)),
-        ]
-        .spacing(10);
-        let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
-        let backdrop = container(container(dialog).width(460))
-            .center(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
-                ..container::Style::default()
-            });
-        opaque(backdrop)
+        self.dialog(
+            "Turn dual connection off?".to_owned(),
+            "If two devices are connected to your buds, they may drop one of them.",
+            Message::ConfirmDual,
+            "Turn off",
+        )
     }
 
-    /// "Delete the preset?", over a dimmed window: its bands are lost.
+    /// "Delete the preset?": its bands are lost.
     fn confirm_delete(&self, id: u8) -> Element<'_, Message> {
-        let look = self.look;
-        let p = look.p;
         let name = self
             .buds
             .preset(id)
             .map_or("this preset", |preset| preset.name.as_str());
-        let words = column![
-            text(format!("Delete {name}?")).size(22).font(look.bold()).color(p.fg),
-            text("Its bands are lost. The buds keep their other presets.")
-                .size(14)
-                .color(p.dim),
-        ]
-        .spacing(8);
-        let buttons = row![
-            space::horizontal(),
-            ui::pill(look, "Cancel", false, Message::ConfirmDelete(false)),
-            ui::pill(look, "Delete", true, Message::ConfirmDelete(true)),
-        ]
-        .spacing(10);
-        let dialog = ui::panel(look, column![words, buttons].spacing(22).into());
-        let backdrop = container(container(dialog).width(460))
-            .center(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
-                ..container::Style::default()
-            });
-        opaque(backdrop)
+        self.dialog(
+            format!("Delete {name}?"),
+            "Its bands are lost. The buds keep their other presets.",
+            Message::ConfirmDelete,
+            "Delete",
+        )
     }
 
     /// The dialog that asks for a preset's name, over a dimmed window.
@@ -1588,60 +1549,56 @@ impl App {
             .on_input(Message::NameInput)
             .on_submit(Message::SubmitName)
             .size(16)
-            .padding([10, 14])
+            .padding([12, 20])
             .style(move |_, _| text_input::Style {
-                background: p.surface_high.into(),
+                background: p.s2.into(),
                 border: Border {
-                    color: p.accent,
+                    color: p.fill,
                     width: 1.0,
-                    radius: 10.0.into(),
+                    radius: 999.0.into(),
                 },
-                icon: p.dim,
-                placeholder: p.dim,
+                icon: p.grey,
+                placeholder: p.grey,
                 value: p.fg,
-                selection: p.accent_dim,
+                selection: p.container,
             });
         let problem = prompt
             .problem
             .as_deref()
-            .map(|problem| text(problem).size(13).color(p.err));
+            .map(|problem| container(text(problem).size(13).color(p.err)).padding([0, 20]));
         let buttons = row![
             space::horizontal(),
             ui::pill(look, "Cancel", false, Message::CancelName),
             ui::pill(look, action, true, Message::SubmitName),
         ]
         .spacing(10);
-        let dialog = column![text(heading).size(22).font(look.bold()).color(p.fg), field]
+        let dialog = column![ui::headline(look, heading), field]
             .push(problem)
             .push(buttons)
-            .spacing(16);
-        let backdrop = container(container(ui::panel(look, dialog.into())).width(460))
-            .center(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
-                ..container::Style::default()
-            });
-        opaque(backdrop)
+            .spacing(18);
+        opaque(ui::scrim(look, ui::panel(look, dialog.into()), 480.0))
     }
 
     /// The list of keys, over a dimmed window. A key or a click closes it.
     fn help(&self) -> Element<'_, Message> {
         let look = self.look;
         let p = look.p;
-        let rows = keys::HELP.iter().fold(Column::new().spacing(9), |rows, &(keys, what)| {
-            rows.push(row![
-                text(keys).size(14).font(look.medium()).color(p.fg).width(170),
-                text(what).size(14).color(p.dim)
-            ])
-        });
-        let list = ui::panel(look, column![ui::title(look, "Keys"), rows].spacing(18).into());
-        let backdrop = container(container(list).width(560))
-            .center(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color { a: 0.6, ..Color::BLACK }.into()),
-                ..container::Style::default()
+        let rows = keys::HELP
+            .iter()
+            .fold(Column::new().spacing(10), |rows, &(keys, what)| {
+                rows.push(
+                    row![
+                        text(keys).size(13).font(look.mono()).color(p.fg).width(180),
+                        text(what).size(14).color(p.fg_dim)
+                    ]
+                    .align_y(Alignment::Center),
+                )
             });
-        opaque(mouse_area(backdrop).on_press(Message::CloseHelp))
+        let heading = row![ui::num(look, "keys", 40.0, p.fg), ui::dot(p.live, 12.0)]
+            .spacing(12)
+            .align_y(Alignment::Center);
+        let list = ui::panel(look, column![heading, rows].spacing(22).into());
+        opaque(mouse_area(ui::scrim(look, list, 580.0)).on_press(Message::CloseHelp))
     }
 }
 
@@ -1683,12 +1640,12 @@ mod tests {
 
     /// With the made-up buds.
     fn app() -> App {
-        App::new(None, Font::DEFAULT, None, true)
+        App::new(None, None, true)
     }
 
     /// Talking to a worker that the test plays: the receiver gets what the app sends it.
     fn live() -> (App, Receiver<Command>) {
-        let mut app = App::new(None, Font::DEFAULT, None, false);
+        let mut app = App::new(None, None, false);
         let (worker, commands) = mpsc::channel();
         let _ = app.update(Message::Worker(Event::Ready(worker)));
         (app, commands)
@@ -2361,10 +2318,9 @@ mod tests {
     fn pages_render() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/gui-snapshots");
         let _ = fs::remove_dir_all(&dir);
-        let font = theme::system_font();
         let palette = std::env::var_os("BUDCTL_THEME").map(PathBuf::from);
         let on = |page: Page, keys: &str| {
-            let mut app = App::new(palette.clone(), font, None, true);
+            let mut app = App::new(palette.clone(), None, true);
             app.page = page;
             press(&mut app, keys);
             app
@@ -2400,10 +2356,10 @@ mod tests {
         let mut deleting = on(Page::Equalizer, "");
         let _ = deleting.update(Message::DeletePreset(4));
         shots.push(("delete-confirm".to_owned(), 800.0, deleting));
-        let mut connecting = App::new(palette.clone(), font, None, false);
+        let mut connecting = App::new(palette.clone(), None, false);
         connecting.link = Link::Connecting;
         shots.push(("connecting".to_owned(), 800.0, connecting));
-        let mut busy = App::new(palette.clone(), font, None, false);
+        let mut busy = App::new(palette.clone(), None, false);
         busy.answer(Event::Failed {
             kind: Kind::Busy,
             message: "control channel busy: is another app connected?".to_owned(),
@@ -2418,7 +2374,7 @@ mod tests {
         let _ = saving.update(Message::Switch("spatial", false));
         let _ = saving.update(Message::Noise(NoiseMode::Off));
         shots.push(("saving".to_owned(), 1240.0, saving));
-        render(&dir, font, shots);
+        render(&dir, shots);
     }
 
     /// The README's screenshots: the demo buds in the built-in palette, written to
@@ -2429,9 +2385,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let scratch = root.join("target/readme-screenshots");
         let _ = fs::remove_dir_all(&scratch);
-        let font = theme::system_font();
         let on = |page: Page, keys: &str| {
-            let mut app = App::new(None, font, None, true);
+            let mut app = App::new(None, None, true);
             app.page = page;
             press(&mut app, keys);
             app
@@ -2446,7 +2401,7 @@ mod tests {
             ("keys".to_owned(), 800.0, on(Page::Overview, "?")),
         ];
         let names: Vec<String> = shots.iter().map(|(name, _, _)| name.clone()).collect();
-        render(&scratch, font, shots);
+        render(&scratch, shots);
         let out = root.join("docs/screenshots");
         fs::create_dir_all(&out).unwrap();
         for name in names {
@@ -2459,10 +2414,11 @@ mod tests {
     }
 
     /// Renders each (name, window height, app) 1040 px wide, to `<dir>/<name>-tiny-skia.png`.
-    fn render(dir: &Path, font: Font, shots: Vec<(String, f32, App)>) {
+    fn render(dir: &Path, shots: Vec<(String, f32, App)>) {
         for (name, height, app) in shots {
             let settings = iced::Settings {
-                default_font: font,
+                default_font: theme::UI,
+                fonts: theme::FONTS.into_iter().map(Into::into).collect(),
                 ..iced::Settings::default()
             };
             let mut ui = iced_test::Simulator::with_size(settings, Size::new(1040.0, height), app.view());

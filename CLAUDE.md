@@ -114,8 +114,9 @@ Exit codes:
 
 ## GUI
 
-- **Look:** a sidebar (device card, pages) and pages of cards: battery rings, a segmented noise-control pill, rows of switches. The owner's reference is a screenshot of another buds app; match the look, never its code (rule 2).
-- **Theme:** a built-in dark palette with a red accent. Optionally, a matugen JSON file with the same keys as the owner's Aurora palette (`~/.cache/matugen/aurora.json`: `bg`, `fg`, `primary`, `surface`…), mapped to the same roles as Aurora's `Theme.qml`. It is read again whenever the window gets focus.
+- **Look:** Nothing OS's shapes and type in Material You colors, as in the owner's Aurora shell (its `Theme.qml` and primitives are the reference; match the look, never copy code, rule 2). A sidebar of dot-matrix page words (the open one large, with the live dot), each page under a caps caption; round cards of rows with the icon in a circle; LED-dot battery rings with Doto figures; dotted sliders; pill switches, tracks and chips. The pieces are in `ui.rs` and `dots.rs`.
+- **Fonts:** built into the binary from `crates/budctl-gui/fonts/` (OFL 1.1, `OFL.txt`): Space Grotesk (UI text), Space Mono (caps labels), and "Doto Rounded", a static rounded-dot black instance of Doto made with fontTools (`varLib.instancer ROND=100 wght=900`, subset to Latin, renamed as the OFL asks). Doto is never set under 26 px.
+- **Theme:** a built-in palette (near-black surfaces, white "on" states, red for live things). Optionally, a matugen JSON file with the Material 3 keys of the owner's Aurora palette (`~/.cache/matugen/aurora.json`: `primary`, `tertiary`, `surfaceLowest`…`surfaceHighest`, `outline`…; `bg`/`fg` still read), mapped to the same roles as Aurora's `Theme.qml`: primary = fills, tertiary = live, the surface ladder = s1/s2/s3. It is read again whenever the window gets focus.
 - **Input:** the mouse and touchpad come first. Vim-like keys are a layer on top (`keys.rs`, `?` lists them in the window):
   - `j`/`k`, the arrows or Tab move a cursor over what the page can change; `gg`/`G` jump to the first or last item.
   - `h`/`l` pick the previous or next choice, or turn a switch off or on, and `l` opens a row's page. Enter and Space toggle, step round the choices, or open.

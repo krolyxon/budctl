@@ -1,11 +1,12 @@
 //! The Equalizer page: the presets, and the bands of the custom ones.
 
 use budctl_core::status::{EqBand, EqPreset};
-use iced::widget::{Row, column, container, row, slider, space, text, vertical_slider};
+use iced::widget::{Row, column, container, row, text};
 use iced::{Alignment, Border, Element, Length};
 
 use crate::buds::{self, Buds};
-use crate::icons::{self, Icon};
+use crate::dots;
+use crate::icons::Icon;
 use crate::theme::Look;
 use crate::ui;
 use crate::{Draft, Item, Marks, Message};
@@ -57,9 +58,9 @@ pub fn view<'a>(
     marks: Marks,
 ) -> Element<'a, Message> {
     let p = look.p;
-    let title = ui::title(look, "Equalizer");
+    let title = ui::title(look, "equalizer · presets, and the bands of yours");
     let Some(eq) = &buds.eq else {
-        let none = text("These buds did not list their presets.").size(14).color(p.dim);
+        let none = ui::note(look, "These buds did not list their presets.");
         return column![title, none].spacing(12).into();
     };
     let current = eq.current.as_deref();
@@ -78,36 +79,31 @@ pub fn view<'a>(
             } else {
                 "Built in"
             };
-            let mark: Element<'a, Message> = if chosen {
-                icons::icon(Icon::Check, 20.0, p.icon)
-            } else {
-                space().width(20).into()
-            };
+            let mark: Option<Element<'a, Message>> = chosen.then(|| ui::label(look, "in use", 10.5, p.fg));
             let trailing: Element<'a, Message> = if preset.custom {
-                row![
-                    mark,
-                    ui::icon_button(
+                row![mark]
+                    .push(ui::icon_button(
                         look,
                         Icon::Pencil,
                         marks.focus == Some(Item::Edit(id)),
-                        Message::EditPreset(id)
-                    ),
-                    ui::icon_button(
+                        Message::EditPreset(id),
+                    ))
+                    .push(ui::icon_button(
                         look,
                         Icon::Trash,
                         marks.focus == Some(Item::Delete(id)),
-                        Message::DeletePreset(id)
-                    ),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .into()
+                        Message::DeletePreset(id),
+                    ))
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .into()
             } else {
-                mark
+                row![mark].into()
             };
-            ui::setting(
+            ui::list_row(
                 look,
                 Icon::Equalizer,
+                chosen,
                 buds::shown_name(preset),
                 Some(subtitle.to_owned()),
                 trailing,
@@ -119,10 +115,12 @@ pub fn view<'a>(
     let editor: Option<Element<'a, Message>> = match edited(buds, editing) {
         Some(preset) => Some(bands(look, preset, draft, marks)),
         None if eq.presets.iter().any(|p| p.custom) => Some(
-            text("Use the pencil on one of your presets to change its bands.")
-                .size(13)
-                .color(p.dim)
-                .into(),
+            container(ui::note(
+                look,
+                "Use the pencil on one of your presets to change its bands.",
+            ))
+            .padding([0, 18])
+            .into(),
         ),
         None => None,
     };
@@ -136,11 +134,8 @@ fn new_preset<'a>(look: Look, marks: Marks) -> Element<'a, Message> {
     let creating = marks
         .pending
         .contains(&Item::NewPreset)
-        .then(|| text("Creating…").size(13).color(look.p.icon));
-    let about = text("A new preset starts flat and is put to use.")
-        .size(13)
-        .color(look.p.dim)
-        .width(Length::Fill);
+        .then(|| ui::label(look, "Creating…", 11.0, look.p.live));
+    let about = container(ui::note(look, "A new preset starts flat and is put to use.")).width(Length::Fill);
     row![about]
         .push(creating)
         .push(ui::pill_with(
@@ -152,7 +147,7 @@ fn new_preset<'a>(look: Look, marks: Marks) -> Element<'a, Message> {
         ))
         .spacing(14)
         .align_y(Alignment::Center)
-        .padding([0, 8])
+        .padding([0, 18])
         .into()
 }
 
@@ -168,13 +163,10 @@ fn bands<'a>(look: Look, preset: &'a EqPreset, draft: Option<&'a Draft>, marks: 
     let saving = marks
         .pending
         .contains(&Item::Preset(id))
-        .then(|| text(SAVING).size(13).color(p.icon));
+        .then(|| ui::label(look, SAVING, 11.0, p.live));
     let heading = row![
-        text(preset.name.as_str()).size(16).font(look.medium()).color(p.fg),
-        text(format!("{low:+} to {high:+} dB"))
-            .size(13)
-            .color(p.dim)
-            .width(Length::Fill)
+        text(preset.name.as_str()).size(20).font(look.semibold()).color(p.fg),
+        container(ui::label(look, &format!("{low:+} to {high:+} dB"), 11.0, p.grey)).width(Length::Fill)
     ]
     .push(saving)
     .push(ui::pill_with(
@@ -193,58 +185,51 @@ fn bands<'a>(look: Look, preset: &'a EqPreset, draft: Option<&'a Draft>, marks: 
     ))
     .spacing(10)
     .align_y(Alignment::Center);
-    let note = text("Moving a band saves this preset and puts it in use, so you hear it.")
-        .size(13)
-        .color(p.dim);
+    let note = ui::note(
+        look,
+        "Moving a band saves this preset and puts it in use, so you hear it.",
+    );
     let sliders = gains.iter().fold(Row::new().spacing(6), |sliders, &band| {
         let focused = marks.focus == Some(Item::Band(id, band.hz));
         let hz = band.hz;
-        let slider = vertical_slider(i16::from(low)..=i16::from(high), i16::from(band.gain), move |gain| {
-            Message::Band {
+        let slider = dots::Slider {
+            low: i16::from(low),
+            high: i16::from(high),
+            value: i16::from(band.gain),
+            vertical: true,
+            change: move |gain, save| Message::Band {
                 preset: id,
                 hz,
                 gain: i8::try_from(gain).unwrap_or(0),
-                save: false,
-            }
-        })
-        .on_release(Message::SaveBands(id))
-        .height(170)
-        .style(move |_, _| slider::Style {
-            rail: slider::Rail {
-                backgrounds: (p.accent.into(), p.surface_highest.into()),
-                width: 6.0,
-                border: Border::default().rounded(3),
+                save,
             },
-            handle: slider::Handle {
-                shape: slider::HandleShape::Circle { radius: 9.0 },
-                background: p.fg.into(),
-                border_width: 2.0,
-                border_color: p.accent,
-            },
-        });
+            release: Message::SaveBands(id),
+            on: p.fill,
+            off: p.s3,
+        };
         let band = column![
-            text(gain(band.gain)).size(14).font(look.medium()).color(p.fg),
-            slider,
-            text(frequency(hz)).size(12).color(p.dim)
+            ui::num(look, &gain(band.gain), 28.0, p.fg),
+            slider.view(190.0),
+            ui::label(look, &frequency(hz), 10.5, p.grey)
         ]
-        .spacing(10)
+        .spacing(12)
         .align_x(Alignment::Center);
         sliders.push(
             container(band)
                 .center_x(Length::Fill)
-                .padding([12, 0])
+                .padding([14, 0])
                 .style(move |_| container::Style {
-                    background: focused.then_some(p.surface_high.into()),
+                    background: focused.then_some(p.s2.into()),
                     border: Border {
-                        color: p.accent,
+                        color: p.fill,
                         width: if focused { 2.0 } else { 0.0 },
-                        radius: 12.0.into(),
+                        radius: 24.0.into(),
                     },
                     ..container::Style::default()
                 }),
         )
     });
-    ui::panel(look, column![heading, note, sliders].spacing(14).into())
+    ui::panel(look, column![heading, note, sliders].spacing(16).into())
 }
 
 /// `3` → "+3", `0` → "0", `-2` → "-2".

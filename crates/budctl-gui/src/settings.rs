@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use iced::Element;
-use iced::widget::{column, space, text};
+use iced::widget::{column, container, space};
 
 use crate::Message;
 use crate::icons::Icon;
@@ -17,7 +17,6 @@ pub struct Colors<'a> {
 }
 
 pub fn view<'a>(look: Look, colors: Colors<'a>) -> Element<'a, Message> {
-    let p = look.p;
     let source = match (colors.file, colors.problem) {
         (_, Some(problem)) => format!("Built in: {problem}"),
         (Some(file), None) if file.exists() => format!("From {}", file.display()),
@@ -25,13 +24,14 @@ pub fn view<'a>(look: Look, colors: Colors<'a>) -> Element<'a, Message> {
     };
     let none = || -> Element<'a, Message> { space().into() };
     let palette = ui::setting(look, Icon::Settings, "Colors", Some(source), none(), None, false);
-    let how = text(
-        "budctl follows a matugen palette with Aurora's keys (bg, fg, primary, surface…): the file given \
-         with --theme, else ~/.config/budctl/theme.json, which starts out with the built-in colors. \
-         It is read again whenever the window gets focus.",
-    )
-    .size(13)
-    .color(p.dim);
+    let how = container(ui::note(
+        look,
+        "budctl follows a matugen palette with Aurora's Material 3 keys (primary, tertiary, surfaceLow, \
+         outline…), so ~/.cache/matugen/aurora.json works as it is: the file given with --theme, else \
+         ~/.config/budctl/theme.json, which starts out with the built-in colors. It is read again \
+         whenever the window gets focus.",
+    ))
+    .padding([0, 18]);
     let keys = ui::setting(
         look,
         Icon::Keys,
@@ -69,7 +69,7 @@ pub fn view<'a>(look: Look, colors: Colors<'a>) -> Element<'a, Message> {
         false,
     );
     column![
-        ui::title(look, "App settings"),
+        ui::title(look, "app settings · colors, keys, files"),
         column![ui::card(look, vec![palette]), how].spacing(10),
         ui::card(look, vec![keys]),
         ui::card(look, vec![files, log]),

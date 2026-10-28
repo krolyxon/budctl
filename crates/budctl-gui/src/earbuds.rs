@@ -2,7 +2,7 @@
 
 use budctl_core::status::DualDevice;
 use iced::Element;
-use iced::widget::{column, text};
+use iced::widget::{column, container};
 
 use crate::buds::Buds;
 use crate::icons::Icon;
@@ -24,7 +24,6 @@ pub fn items(buds: &Buds) -> Vec<Item> {
 
 /// `ringing`: the buds were told to ring and not yet to stop.
 pub fn view<'a>(look: Look, buds: &'a Buds, ringing: bool, marks: Marks) -> Element<'a, Message> {
-    let p = look.p;
     let dual = buds.status.switches.iter().find(|s| s.key == DUAL).map(|dual| {
         let about = if marks.pending.contains(&Item::Switch(DUAL)) {
             "Saving…"
@@ -59,9 +58,7 @@ pub fn view<'a>(look: Look, buds: &'a Buds, ringing: bool, marks: Marks) -> Elem
         None,
         marks.focus == Some(Item::Find),
     );
-    let value = |value: Option<&'a str>| -> Element<'a, Message> {
-        text(value.unwrap_or("Unknown")).size(14).color(p.dim).into()
-    };
+    let value = |value: Option<&'a str>| -> Element<'a, Message> { ui::value(look, value.unwrap_or("unknown")) };
     let status = &buds.status;
     let facts = vec![
         ui::setting(look, Icon::Earbud, "Name", None, value(Some(&buds.name)), None, false),
@@ -84,7 +81,7 @@ pub fn view<'a>(look: Look, buds: &'a Buds, ringing: bool, marks: Marks) -> Elem
             false,
         ),
     ];
-    column![ui::title(look, "Earbud settings")]
+    column![ui::title(look, "earbud settings · connection, find, firmware")]
         .push(dual)
         .push(buds.dual.as_deref().map(|list| devices(look, list)))
         .push(column![ui::heading(look, "Find my earbuds"), ui::card(look, vec![find])].spacing(10))
@@ -110,18 +107,31 @@ fn devices<'a>(look: Look, list: &'a [DualDevice]) -> Element<'a, Message> {
             } else {
                 device.name.as_str()
             };
-            let address = text(device.address.to_string()).size(13).color(p.dim);
-            ui::setting(look, icon, name, Some(state(device)), address.into(), None, false)
+            let address = ui::label(look, &device.address.to_string(), 11.0, p.grey);
+            ui::list_row(
+                look,
+                icon,
+                device.connected,
+                name,
+                Some(state(device)),
+                address,
+                None,
+                false,
+            )
         })
         .collect();
     let list: Element<'a, Message> = if rows.is_empty() {
-        text("The buds list no devices.").size(13).color(p.dim).into()
+        container(ui::note(look, "The buds list no devices."))
+            .padding([0, 18])
+            .into()
     } else {
         ui::card(look, rows)
     };
-    let note = text("These buds cannot connect, disconnect or forget a device from here.")
-        .size(13)
-        .color(p.dim);
+    let note = container(ui::note(
+        look,
+        "These buds cannot connect, disconnect or forget a device from here.",
+    ))
+    .padding([0, 18]);
     column![ui::heading(look, "Devices"), list, note].spacing(10).into()
 }
 

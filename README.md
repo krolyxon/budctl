@@ -118,12 +118,20 @@ The mouse works everywhere. Vim-like keys work on top of it (press `?` in the wi
 
 The cursor shows only after you press a key, and the first key only shows it.
 
-**Colors:** a built-in dark palette with a red accent, or a [matugen](https://github.com/InioX/matugen)
-palette: `--theme <file>`, else `~/.config/budctl/theme.json`. The file is JSON with these keys, all
-optional: `bg`, `fg`, `primary`, `primaryFg`, `primaryContainer`, `secondary`, `surfaceLow`,
-`surface`, `surfaceHigh`, `surfaceHighest`, `outlineVariant`, `surfaceVariantFg`, `err`. It is read
-again whenever the window gets focus, so a new wallpaper's colors show up there too. When the file
-is missing, the app writes the built-in colors there: a starting point for a matugen template.
+**Look:** Nothing OS shapes and type in Material You colors: dot-matrix page names and battery
+figures, LED rings and dotted sliders, pill switches and tracks. The fonts (Doto, Space Grotesk,
+Space Mono) are built into the app.
+
+**Colors:** a built-in palette (near-black, white "on" states, red for live things such as the open
+page's dot and "Saving…"), or a [matugen](https://github.com/InioX/matugen) palette: `--theme
+<file>`, else `~/.config/budctl/theme.json`. The file is JSON with Material 3 roles, `on_x` spelled
+`xFg`, all optional: `primary`, `primaryFg`, `primaryContainer`, `primaryContainerFg`, `tertiary`,
+`tertiaryFg`, `surfaceLowest`, `surfaceLow`, `surfaceHigh`, `surfaceHighest`, `surfaceFg`,
+`surfaceVariantFg`, `outline`, `outlineVariant`, `err`, `errFg` (`bg` and `fg` still work for
+`surfaceLowest` and `surfaceFg`; other keys are ignored). A matugen template only needs lines like
+`"primary": "{{colors.primary.default.hex}}"`. The file is read again whenever the window gets
+focus, so a new wallpaper's colors show up there too. When the file is missing, the app writes the
+built-in colors there: a starting point for a template.
 
 **Log:** each launch writes errors and session events (connected, each change and its answer,
 closed) to `~/.local/state/budctl/gui.log`, replacing the last launch's.
@@ -160,3 +168,8 @@ how sure, is written down in [`docs/protocol/`](docs/protocol/): the
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+The desktop app carries the Doto, Space Grotesk and Space Mono fonts, under the SIL Open Font
+License 1.1 ([`crates/budctl-gui/fonts/OFL.txt`](crates/budctl-gui/fonts/OFL.txt)). The Doto in it
+is a static instance (rounded dots, black weight, Latin only), renamed "Doto Rounded" as the
+license asks of modified fonts.
