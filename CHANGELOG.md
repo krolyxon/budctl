@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-10-29)
+
+A new look for the desktop app, after Nothing OS in Material You colors, and a window that no
+longer lags.
 
 - `budctl-gui` has a new look, after Nothing OS in Material You colors, like the owner's Aurora
   shell: dot-matrix page names and battery figures (Doto), LED battery rings, dotted sliders for
