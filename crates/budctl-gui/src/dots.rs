@@ -1,54 +1,81 @@
 //! LED dots, like the Glyph lights: battery rings, and the sliders for the bass level and the EQ
-//! bands. Drawn on a canvas, so they take any theme color.
+//! bands. Drawn on a canvas, so they take any theme color, and kept between frames ([`Kept`]).
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
+use iced::alignment::Vertical;
 use iced::widget::canvas::{self, Event, Frame, Path};
-use iced::{Color, Element, Length, Point, Rectangle, Renderer, Theme, mouse};
+use iced::widget::text;
+use iced::{Color, Element, Font, Length, Point, Rectangle, Renderer, Theme, mouse};
 
 use crate::Message;
+use crate::kept::Kept;
+use crate::theme::Look;
 
-/// A ring of `n` dots, `size` pixels across: the fraction `lit` lights clockwise from the top in
-/// `on`, the rest stay `off`. `None` lights nothing.
-pub fn ring<'a>(lit: Option<f32>, size: f32, on: Color, off: Color) -> Element<'a, Message> {
-    iced::widget::canvas(Ring { lit, on, off })
-        .width(size)
-        .height(size)
-        .into()
+/// A battery ring, `size` pixels across: a ring of dots, lit clockwise from the top up to the
+/// `level` (a percentage), with the level in LED dots in the middle; "--" and no lit dot when it
+/// is unknown. The figure is drawn with the dots, so the page needs no layer of its own for it.
+pub fn ring<'a>(look: Look, level: Option<u8>, size: f32) -> Element<'a, Message> {
+    let p = look.p;
+    let ring = Ring {
+        level,
+        on: p.fill,
+        off: p.s3,
+        figure: if level.is_some() { p.fg } else { p.mute },
+        font: look.dot(),
+    };
+    iced::widget::canvas(ring).width(size).height(size).into()
 }
 
+#[derive(Clone, Copy, PartialEq)]
 struct Ring {
-    lit: Option<f32>,
+    level: Option<u8>,
     on: Color,
     off: Color,
+    figure: Color,
+    font: Font,
 }
 
 impl canvas::Program<Message> for Ring {
-    type State = ();
+    type State = Kept<Ring>;
 
     fn draw(
         &self,
-        _state: &(),
+        kept: &Kept<Ring>,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         const N: u16 = 44;
-        let mut frame = Frame::new(renderer, bounds.size());
-        let center = frame.center();
-        let dot = (bounds.width * 0.045).max(3.0);
-        let radius = bounds.width / 2.0 - dot / 2.0 - 1.0;
-        let lit = self.lit.map_or(0, |f| lit_count(f, N));
-        for n in 0..N {
-            let angle = f32::from(n) / f32::from(N) * TAU - FRAC_PI_2;
-            let at = Point::new(center.x + radius * angle.cos(), center.y + radius * angle.sin());
-            let color = if n < lit { self.on } else { self.off };
-            frame.fill(&Path::circle(at, dot / 2.0), color);
-        }
-        vec![frame.into_geometry()]
+        let geometry = kept.draw(renderer, bounds.size(), *self, |frame| {
+            let center = frame.center();
+            let dot = (bounds.width * 0.045).max(3.0);
+            let radius = bounds.width / 2.0 - dot / 2.0 - 1.0;
+            let lit = self.level.map_or(0, |level| lit_count(f32::from(level) / 100.0, N));
+            for n in 0..N {
+                let angle = f32::from(n) / f32::from(N) * TAU - FRAC_PI_2;
+                let at = Point::new(center.x + radius * angle.cos(), center.y + radius * angle.sin());
+                let color = if n < lit { self.on } else { self.off };
+                frame.fill(&Path::circle(at, dot / 2.0), color);
+            }
+            frame.fill_text(canvas::Text {
+                content: self.level.map_or_else(|| "--".to_owned(), |level| level.to_string()),
+                position: center,
+                color: self.figure,
+                size: FIGURE.into(),
+                font: self.font,
+                align_x: text::Alignment::Center,
+                align_y: Vertical::Center,
+                ..canvas::Text::default()
+            });
+        });
+        vec![geometry]
     }
 }
+
+/// The size of a battery ring's figure. Doto is never set under 26 px.
+const FIGURE: f32 = 44.0;
 
 /// How many of `n` dots the fraction `f` lights.
 fn lit_count(f: f32, n: u16) -> u16 {
@@ -122,9 +149,13 @@ impl<F> Slider<F> {
 const DOT_BIG: f32 = 11.0;
 const DOT: f32 = 5.0;
 
+/// What a slider's drawing shows: its range, its value, which way it runs, and its colors.
+type Shows = (i16, i16, i16, bool, Color, Color);
+
 #[derive(Default)]
 pub struct Drag {
     held: bool,
+    kept: Kept<Shows>,
 }
 
 impl<F: Fn(i16, bool) -> Message> canvas::Program<Message> for Slider<F> {
@@ -175,14 +206,33 @@ impl<F: Fn(i16, bool) -> Message> canvas::Program<Message> for Slider<F> {
 
     fn draw(
         &self,
-        _state: &Drag,
+        state: &Drag,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let size = bounds.size();
+        let shows = (self.low, self.high, self.value, self.vertical, self.on, self.off);
+        vec![
+            state
+                .kept
+                .draw(renderer, bounds.size(), shows, |frame| self.dots(frame)),
+        ]
+    }
+
+    fn mouse_interaction(&self, state: &Drag, bounds: Rectangle, cursor: mouse::Cursor) -> mouse::Interaction {
+        if state.held || cursor.is_over(bounds) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+}
+
+impl<F> Slider<F> {
+    /// One dot per step; the value's dot is larger.
+    fn dots(&self, frame: &mut Frame) {
+        let size = frame.size();
         let at = |along: f32| {
             if self.vertical {
                 Point::new(
@@ -210,15 +260,6 @@ impl<F: Fn(i16, bool) -> Message> canvas::Program<Message> for Slider<F> {
                 Some(next) => next,
                 None => break,
             };
-        }
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(&self, state: &Drag, bounds: Rectangle, cursor: mouse::Cursor) -> mouse::Interaction {
-        if state.held || cursor.is_over(bounds) {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
         }
     }
 }

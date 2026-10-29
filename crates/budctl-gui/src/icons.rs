@@ -4,6 +4,8 @@
 use iced::widget::canvas::{self, Frame, LineCap, LineJoin, Path, Stroke, path::Arc};
 use iced::{Color, Element, Point, Radians, Rectangle, Renderer, Size, Theme, mouse};
 
+use crate::kept::Kept;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Equalizer,
@@ -38,26 +40,28 @@ pub fn icon<'a, Message: 'a>(icon: Icon, size: f32, color: Color) -> Element<'a,
         .into()
 }
 
+#[derive(Clone, Copy, PartialEq)]
 struct Glyph {
     icon: Icon,
     color: Color,
 }
 
 impl<Message> canvas::Program<Message> for Glyph {
-    type State = ();
+    type State = Kept<Glyph>;
 
     fn draw(
         &self,
-        _state: &(),
+        kept: &Kept<Glyph>,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let mut pen = Pen::new(&mut frame, Point::ORIGIN, bounds.width, self.color);
-        draw_icon(&mut pen, self.icon);
-        vec![frame.into_geometry()]
+        let geometry = kept.draw(renderer, bounds.size(), *self, |frame| {
+            let mut pen = Pen::new(frame, Point::ORIGIN, bounds.width, self.color);
+            draw_icon(&mut pen, self.icon);
+        });
+        vec![geometry]
     }
 }
 

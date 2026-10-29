@@ -10,6 +10,14 @@
 - The palette file takes Aurora's Material 3 keys (`primary`, `tertiary`, `surfaceLow`,
   `outline`…), so `~/.cache/matugen/aurora.json` works as it is. `bg` and `fg` are still read;
   `surface` and `secondary` are no longer used.
+- `budctl-gui` no longer lags. It repainted most of the window many times over for each hover,
+  click or scroll step; now it repaints only what changed, and a scroll paints each card once.
+  On the Overview, a hover went from about 25 ms of drawing to 2, a scroll step from about 50
+  to at most 12, and the list of keys from 35 to almost nothing.
+- The keys that need Shift work in `budctl-gui`: `?` (the list of keys), `G`, `J`, `K` and `gT`.
+  The window used to see them without Shift (`/`, `g`, `j`, `k`, `gt`).
+- Built from source, debug builds (`cargo run`) optimize the dependencies, so the desktop app
+  runs smoothly there too.
 
 ## 0.1.1 (2026-10-28)
 

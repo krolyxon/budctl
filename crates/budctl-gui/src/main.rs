@@ -10,6 +10,7 @@ mod earbuds;
 mod equalizer;
 mod gestures;
 mod icons;
+mod kept;
 mod keys;
 mod log;
 mod overview;
@@ -1272,14 +1273,7 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let events = event::listen_with(|event, _status, _window| match event {
-            iced::Event::Window(window::Event::Focused) => Some(Message::Focused),
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                Some(Message::Key(key, modifiers))
-            }
-            iced::Event::Mouse(mouse::Event::ButtonPressed(_)) => Some(Message::Pointer),
-            _ => None,
-        });
+        let events = event::listen_with(|event, _status, _window| on_event(event));
         if self.link == Link::Demo {
             return events;
         }
@@ -1602,6 +1596,22 @@ impl App {
     }
 }
 
+/// What a window event means to the window: focus, a key, a click.
+fn on_event(event: iced::Event) -> Option<Message> {
+    match event {
+        iced::Event::Window(window::Event::Focused) => Some(Message::Focused),
+        // The key as typed, with Shift applied: Shift+/ is `?` and Shift+g is `G`. (`key` has
+        // Shift taken off, and would give `/` and `g`.)
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key,
+            modifiers,
+            ..
+        }) => Some(Message::Key(modified_key, modifiers)),
+        iced::Event::Mouse(mouse::Event::ButtonPressed(_)) => Some(Message::Pointer),
+        _ => None,
+    }
+}
+
 /// The choice `action` moves to from the one at `at`: `h` and `l` stop at the ends, Enter goes
 /// round. With nothing chosen, any of them picks the first.
 fn step<T: Copy>(choices: &[T], at: Option<usize>, action: Action) -> Option<T> {
@@ -1840,6 +1850,34 @@ mod tests {
         press(&mut app, "?");
         let _ = app.update(Message::CloseHelp);
         assert!(!app.help);
+    }
+
+    /// Keys as the window gets them: iced gives the key both without Shift (`key`) and as typed
+    /// (`modified_key`). `?` and `G` only exist as typed.
+    #[test]
+    fn shifted_keys_count_as_typed() {
+        let typed = |key: &str, modified: &str| {
+            on_event(iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Character(key.into()),
+                modified_key: Key::Character(modified.into()),
+                physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+                location: keyboard::Location::Standard,
+                modifiers: Modifiers::SHIFT,
+                text: Some(modified.into()),
+                repeat: false,
+            }))
+            .unwrap()
+        };
+        let mut app = app();
+        let _ = app.update(typed("/", "?"));
+        assert!(app.help, "Shift+/ opens the list of keys");
+        let _ = app.update(typed("/", "?"));
+        assert!(!app.help);
+        press(&mut app, "j");
+        let _ = app.update(typed("g", "G"));
+        assert_eq!(app.cursor, app.items().len() - 1, "Shift+g goes to the last item");
+        let _ = app.update(typed("j", "J"));
+        assert_eq!(app.page, Page::Equalizer, "Shift+j goes to the next page");
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! Everything takes its colors from the [`Look`].
 
 use iced::alignment::Horizontal;
-use iced::widget::{Column, Row, button, column, container, row, space, text};
+use iced::widget::{Column, Row, Stack, button, column, container, row, space, text};
 use iced::{Alignment, Border, Color, Element, Length};
 
 use crate::Message;
@@ -58,21 +58,34 @@ pub fn note<'a>(look: Look, words: impl text::IntoFragment<'a>) -> Element<'a, M
 /// A round card holding rows.
 pub fn card<'a>(look: Look, rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     let p = look.p;
-    container(Column::with_children(rows).spacing(2))
-        .padding(6)
-        .width(Length::Fill)
-        .style(move |_| surface(p.s1, CARD))
-        .into()
+    layer(
+        container(Column::with_children(rows).spacing(2))
+            .padding(6)
+            .width(Length::Fill)
+            .style(move |_| surface(p.s1, CARD)),
+    )
 }
 
 /// A round card around content of its own.
 pub fn panel<'a>(look: Look, content: Element<'a, Message>) -> Element<'a, Message> {
     let p = look.p;
-    container(content)
-        .padding(24)
-        .width(Length::Fill)
-        .style(move |_| surface(p.s1, CARD))
-        .into()
+    layer(
+        container(content)
+            .padding(24)
+            .width(Length::Fill)
+            .style(move |_| surface(p.s1, CARD)),
+    )
+}
+
+/// `content` on a layer of its own, clipped to its bounds.
+///
+/// The CPU renderer repaints a page that scrolls patch by patch: one for each word, icon and
+/// row that moved, with the whole card under each patch painted again. A layer that moved is
+/// one patch, so a card is painted about once per frame instead of dozens of times.
+fn layer<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    // The stack takes its size from `content` and draws it on a layer of its own, above the
+    // empty space under it.
+    Stack::new().push(content).push_under(space()).clip(true).into()
 }
 
 fn surface(color: Color, radius: f32) -> container::Style {

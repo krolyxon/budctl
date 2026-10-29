@@ -1,7 +1,7 @@
 //! The Overview page: battery, noise control, the switches, and the way to the other pages.
 
 use budctl_core::status::{AncLevel, Charge, NoiseMode, Switch};
-use iced::widget::{column, container, row, stack};
+use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
 
 use crate::buds::Buds;
@@ -64,14 +64,7 @@ pub fn view<'a>(
 fn battery<'a>(look: Look, buds: &Buds) -> Element<'a, Message> {
     let p = look.p;
     let gauge = |label: &str, charge: Option<Charge>| -> Element<'a, Message> {
-        let figure = match charge {
-            Some(charge) => ui::num(look, &charge.level.to_string(), 44.0, p.fg),
-            None => ui::num(look, "--", 44.0, p.mute),
-        };
-        let ring = stack![
-            dots::ring(charge.map(|c| f32::from(c.level) / 100.0), 150.0, p.fill, p.s3),
-            container(figure).center(150),
-        ];
+        let ring = dots::ring(look, charge.map(|c| c.level), 150.0);
         let charging = charge.is_some_and(|c| c.charging);
         let caption = row![ui::label(look, label, 11.0, p.grey)]
             .push(charging.then(|| icons::icon(Icon::Bolt, 14.0, p.live)))
