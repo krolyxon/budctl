@@ -4,27 +4,28 @@
 # .sha256 files (or run updpkgsums).
 
 pkgname=budctl-bin
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc='Control wireless earbuds from Linux without the vendor app (CLI and Wayland GUI)'
 arch=('x86_64' 'aarch64')
 url='https://github.com/krolyxon/budctl'
-license=('GPL-3.0-or-later')
+license=('GPL-3.0-or-later' 'OFL-1.1')
 depends=('glibc' 'gcc-libs' 'bluez')
 optdepends=('wayland: for budctl-gui'
             'libxkbcommon: for budctl-gui'
-            'fontconfig: budctl-gui uses the desktop sans-serif font')
+            'fontconfig: system fonts for characters the built-in ones lack')
 provides=('budctl')
 conflicts=('budctl')
 options=('!strip' '!debug')
 source_x86_64=("budctl-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/budctl-x86_64-unknown-linux-gnu.tar.gz")
 source_aarch64=("budctl-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/budctl-aarch64-unknown-linux-gnu.tar.gz")
-sha256sums_x86_64=('d05c8a5d3bca2c1878be36ef56acb88dcd7438db0dfdb77da894ff2c9072d0b0')
-sha256sums_aarch64=('f02f56b274d60448fe12f939ee989b166e69ae8bc9e2b17a3b29b3361a85c02d')
+sha256sums_x86_64=('2d18a3ed9be4d142da9b077564ef7415da0d46c8a99661785da6310bf36e80d2')
+sha256sums_aarch64=('8416202ad2b8f8814fae159aab2931c400afe52a3cb400c7eb9a7760d41fa5a0')
 
 package() {
   cd "budctl-$CARCH-unknown-linux-gnu"
   install -Dm755 budctl budctl-gui -t "$pkgdir/usr/bin/"
   install -Dm644 budctl.desktop -t "$pkgdir/usr/share/applications/"
   install -Dm644 README.md -t "$pkgdir/usr/share/doc/budctl/"
+  install -Dm644 OFL-fonts.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
 }
