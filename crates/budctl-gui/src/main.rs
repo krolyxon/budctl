@@ -1,8 +1,8 @@
 //! `budctl-gui`: control wireless earbuds from Linux, in a window.
 //!
-//! A thin layer over budctl-core, like the CLI: `worker.rs` talks to the buds on a thread of its
-//! own, and the window shows what they report. The mouse comes first; vim-like keys work on top
-//! (`keys.rs`). `--demo` shows made-up buds instead.
+//! A thin layer over budctl-core, like the CLI: core's worker talks to the buds on a thread of its
+//! own (`worker.rs` runs it), and the window shows what they report. The mouse comes first;
+//! vim-like keys work on top (`keys.rs`). `--demo` shows made-up buds instead.
 
 mod buds;
 mod dots;
@@ -427,6 +427,8 @@ enum Message {
     ShowHelp,
     /// Read the buds again.
     Refresh,
+    /// The worker is up, and takes commands here.
+    Ready(Sender<Command>),
     Worker(Event),
     /// The window got focus: the palette file may have changed meanwhile, and so may the buds.
     Focused,
@@ -636,6 +638,10 @@ impl App {
                 self.confirm_delete = None;
             }
             Message::Refresh => self.refresh(),
+            Message::Ready(worker) => {
+                self.worker = Some(worker);
+                self.send(Command::Read, None);
+            }
             Message::Worker(event) => self.answer(event),
             Message::Focused => {
                 self.refresh_palette();
@@ -885,10 +891,6 @@ impl App {
     /// Takes in what the worker reports.
     fn answer(&mut self, event: Event) {
         match event {
-            Event::Ready(worker) => {
-                self.worker = Some(worker);
-                self.send(Command::Read, None);
-            }
             Event::Found(name) => self.buds.name = name,
             Event::Lost(message) => {
                 self.buds.connected = false;
@@ -1449,7 +1451,7 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![event::listen_with(|event, _status, _window| on_event(event))];
         if self.link != Link::Demo {
-            subscriptions.push(Subscription::run_with((self.device, self.idle), worker::run).map(Message::Worker));
+            subscriptions.push(Subscription::run_with((self.device, self.idle), worker::run));
         }
         // Every frame while something fades, and none once it is over: the window rests.
         if self.fading() {
@@ -1848,7 +1850,7 @@ mod tests {
     fn live() -> (App, Receiver<Command>) {
         let mut app = App::new(None, None, false);
         let (worker, commands) = mpsc::channel();
-        let _ = app.update(Message::Worker(Event::Ready(worker)));
+        let _ = app.update(Message::Ready(worker));
         (app, commands)
     }
 

@@ -16,6 +16,7 @@ mod error;
 mod reader;
 pub mod status;
 pub mod transport;
+pub mod worker;
 
 pub use error::{Error, Kind, Result};
 
