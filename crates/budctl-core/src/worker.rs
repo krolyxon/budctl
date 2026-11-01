@@ -28,7 +28,7 @@ pub enum Command {
     Read,
     Noise(NoiseMode),
     /// A switch's key, and whether to turn it on.
-    Switch(&'static str, bool),
+    Switch(String, bool),
     /// Select a built-in EQ preset, by name.
     Eq(String),
     /// Save a custom EQ preset (`custom-<id>`) with these bands changed, which also selects it.
@@ -195,7 +195,7 @@ impl Worker {
                 .map(Event::Noise),
             Command::Switch(key, on) => self
                 .session()
-                .and_then(|session| session.set_switch(key, on))
+                .and_then(|session| session.set_switch(&key, on))
                 .map(Event::Switch),
             Command::Eq(preset) => self
                 .session()

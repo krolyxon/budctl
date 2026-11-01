@@ -568,11 +568,14 @@ impl App {
             Message::Noise(mode) => self.write(Item::NoiseMode, Command::Noise(mode)),
             // Turning dual connection off may drop one of two connected devices: ask first.
             Message::Switch(earbuds::DUAL, false) => self.confirm_dual = true,
-            Message::Switch(key, on) => self.write(Item::Switch(key), Command::Switch(key, on)),
+            Message::Switch(key, on) => self.write(Item::Switch(key), Command::Switch(key.to_owned(), on)),
             Message::ConfirmDual(yes) => {
                 self.confirm_dual = false;
                 if yes {
-                    self.write(Item::Switch(earbuds::DUAL), Command::Switch(earbuds::DUAL, false));
+                    self.write(
+                        Item::Switch(earbuds::DUAL),
+                        Command::Switch(earbuds::DUAL.to_owned(), false),
+                    );
                 }
             }
             Message::Preset(id) => self.select(id),
@@ -2126,7 +2129,7 @@ mod tests {
         let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
 
         let _ = app.update(Message::Switch("game", true));
-        assert!(matches!(commands.try_recv(), Ok(Command::Switch("game", true))));
+        assert!(matches!(commands.try_recv(), Ok(Command::Switch(key, true)) if key == "game"));
         assert!(!switch(&app, "game"), "the switch changes when the buds say so");
         assert_eq!(app.pending(), [Item::Switch("game")]);
         // While it is on its way, the same switch takes no other write.
@@ -2510,7 +2513,7 @@ mod tests {
         let _ = app.update(Message::Switch("dual", false));
         assert!(commands.try_recv().is_err());
         let _ = app.update(Message::ConfirmDual(true));
-        assert!(matches!(commands.try_recv(), Ok(Command::Switch("dual", false))));
+        assert!(matches!(commands.try_recv(), Ok(Command::Switch(key, false)) if key == "dual"));
     }
 
     #[test]

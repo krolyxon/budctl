@@ -45,7 +45,7 @@ impl Hexdump {
 
     fn print(&self, direction: &str, bytes: &[u8]) {
         let elapsed = self.start.elapsed().as_secs_f64();
-        eprintln!("{elapsed:>7.3} {direction} {}", debug::hex(bytes));
+        debug::line(&format!("{elapsed:>7.3} {direction} {}", debug::hex(bytes)));
     }
 }
 

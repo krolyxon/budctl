@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/budctl-core", "crates/budctl-cli", "crates/budctl-gui"]
+members = ["crates/budctl-core", "crates/budctl-cli", "crates/budctl-gui", "crates/budctl-android"]
 
 [workspace.package]
 version = "0.1.3"
@@ -10,7 +10,8 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [workspace.lints.rust]
-# The only exception is crates/budctl-core/src/transport/socket.rs (Bluetooth socket syscalls).
+# The exceptions: crates/budctl-core/src/transport/socket.rs (Bluetooth socket syscalls) and the
+# JNI exports' #[unsafe(no_mangle)] in crates/budctl-android/src/lib.rs.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

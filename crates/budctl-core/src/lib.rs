@@ -21,13 +21,12 @@ pub mod worker;
 pub use error::{Error, Kind, Result};
 
 use bt::BdAddr;
-use devices::Device;
-#[cfg(target_os = "linux")]
-use devices::Session;
+use devices::{Device, Session};
 #[cfg(target_os = "linux")]
 use transport::rfcomm::Rfcomm;
 #[cfg(target_os = "linux")]
-use transport::{Hexdump, Transport, sdp};
+use transport::sdp;
+use transport::{Hexdump, Transport};
 
 /// A paired device, as the system describes it: BlueZ on Linux, the app's Kotlin side on Android.
 #[derive(Debug, Clone)]
@@ -116,27 +115,39 @@ pub fn select(found: Vec<Found>, address: Option<BdAddr>) -> Result<(PairedDevic
 /// init sequence.
 #[cfg(target_os = "linux")]
 pub fn connect(device: &PairedDevice, model: &'static dyn Device) -> Result<Box<dyn Session>> {
-    if !device.connected {
-        return Err(Error::NotConnected(format!(
-            "{} ({}) is paired but not connected; connect it in your Bluetooth settings first",
-            device.alias, device.address
-        )));
-    }
+    ensure_connected(device)?;
     for &service in model.rfcomm_uuids() {
         let Some(channel) = sdp::rfcomm_channel(device.address, service)? else {
             debug::note(|| format!("SDP: {} has no service {service}", device.address));
             continue;
         };
         debug::note(|| format!("SDP: service {service} is on RFCOMM channel {channel}"));
-        let rfcomm = Box::new(Rfcomm::connect(device.address, channel)?);
-        let link: Box<dyn Transport> = if debug::enabled() {
-            Box::new(Hexdump::new(rfcomm))
-        } else {
-            rfcomm
-        };
-        return model.open(link);
+        return open(model, Box::new(Rfcomm::connect(device.address, channel)?));
     }
     Err(Error::NoService(device.address.to_string()))
+}
+
+/// The control channel only opens while the buds are connected (the audio link is up): say so
+/// plainly instead of failing at the connect.
+pub fn ensure_connected(device: &PairedDevice) -> Result<()> {
+    if device.connected {
+        return Ok(());
+    }
+    Err(Error::NotConnected(format!(
+        "{} ({}) is paired but not connected; connect it in your Bluetooth settings first",
+        device.alias, device.address
+    )))
+}
+
+/// Run the model's init sequence on a fresh link to the buds and return the session. With debug
+/// on, every chunk on the link is dumped.
+pub fn open(model: &'static dyn Device, link: Box<dyn Transport>) -> Result<Box<dyn Session>> {
+    let link: Box<dyn Transport> = if debug::enabled() {
+        Box::new(Hexdump::new(link))
+    } else {
+        link
+    };
+    model.open(link)
 }
 
 #[cfg(test)]

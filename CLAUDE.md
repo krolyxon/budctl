@@ -28,7 +28,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 3. **Never guess command bytes.** Every command in a device module must trace back to an anchor in its protocol spec, and the spec must give the fact's evidence level (`realme_t310.md#sources`): seen on a T310, vendor behavior, another model of the family, derived, or verified by us on hardware (`ours-YYYY-MM-DD`).
    - Put the spec reference in a doc comment on the constant, as `/// Spec: realme_t310.md#anchor`. `tests/guards.rs` checks that each anchor exists.
 4. **Write commands are the risky part.** Read-only commands (battery, current ANC mode, firmware version) get implemented and tested first. Write commands are added one at a time and tested on real hardware before the next one.
-5. **No `unwrap()`/`expect()`/`panic!`/indexing outside tests.** Bluetooth fails in many ways, and every failure becomes a typed `budctl_core::Error`. Workspace clippy lints enforce this. `unsafe` is allowed only in `crates/budctl-core/src/transport/socket.rs`.
+5. **No `unwrap()`/`expect()`/`panic!`/indexing outside tests.** Bluetooth fails in many ways, and every failure becomes a typed `budctl_core::Error`. Workspace clippy lints enforce this. `unsafe` is allowed only in `crates/budctl-core/src/transport/socket.rs`, and for the JNI exports' `#[unsafe(no_mangle)]` in `crates/budctl-android/src/lib.rs` (the owner's decision, 2026-11-01).
 
 ## Stack
 
@@ -36,6 +36,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
   - `crates/budctl-core`: library with transport, BlueZ, device plugins and the session worker. It builds for Android too (`aarch64-linux-android`): BlueZ, the sockets and SDP are Linux-only (`cfg(target_os = "linux")`).
   - `crates/budctl-cli`: package and binary `budctl`.
   - `crates/budctl-gui`: package and binary `budctl-gui`, built with iced 0.14 for Wayland only, with the CPU renderer (tiny-skia).
+  - `crates/budctl-android`: `libbudctl_android.so` for the Android app, built with `cargo ndk`: three JNI exports, JSON commands and events, and a `Transport` over the app's Bluetooth link (`docs/android.md#boundary`).
 - On Linux, Bluetooth goes through BlueZ:
   - Raw `AF_BLUETOOTH` sockets via `libc`: RFCOMM for the control link, L2CAP to read the buds' SDP record.
   - `zbus` (blocking API) only to list paired devices.
@@ -46,6 +47,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
   - core: `serde`, `serde_json` (config file); on Linux only, `libc` and `zbus`
   - cli: `clap`, `serde_json`
   - gui: `iced`, `serde`, `serde_json`; `iced_test` for tests
+  - android: `jni`, `serde`, `serde_json`
 
 ## Device plugin contract
 

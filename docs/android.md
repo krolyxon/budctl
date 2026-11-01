@@ -47,21 +47,26 @@ Rust exports, called from Kotlin (`Core.kt`):
 
 | Function | Does |
 |---|---|
-| `start(platform, idleMs, debug)` | starts the worker; `platform` is Kotlin's side, below |
-| `command(json)` | queues one command; its event comes back through `platform.event` |
+| `start(platform, idleMs, debug): String?` | starts the worker, in place of any running one; `platform` is Kotlin's side, below. Null, or why it could not start |
+| `command(json): String?` | queues one command; its event comes back through `platform.event`. Null, or why it was not queued |
 | `stop()` | ends the worker, which closes any session |
 
-Kotlin's side, called on the worker's thread:
+Kotlin's side (`Platform`), called on the worker's thread. It catches its own exceptions and
+answers with values:
 
 | Method | Does |
 |---|---|
-| `pairedDevices()` | the paired devices as JSON: address, name, alias, connected, service UUIDs |
-| `connect(address, uuid)` | opens the RFCOMM socket to that service, or fails with a kind (`busy`, `not-connected`, `failed`) and a message |
+| `pairedDevices(): String` | the paired devices as JSON: address, name, alias, connected, service UUIDs |
+| `connect(address, service): String?` | opens the RFCOMM link to that service, in place of any open one. Null, or `{"kind", "message"}` with the kind `busy`, `not-connected`, `timeout` or `failed` |
+| `send(bytes): String?` | null, or why the link failed |
+| `recv(timeoutMs): ByteArray?` | the next bytes; null once the time runs out; an empty array once the link is closed |
+| `close()` | closes the link |
 | `event(json)` | one worker event, for the UI |
 | `log(line)` | a session or debug line, for logcat and the in-app log |
 
-The link that `connect` returns has `send(bytes)`, `recv(timeoutMs)` (the bytes, or null once the
-time runs out) and `close()`.
+Commands look like `{"command": "noise", "mode": "anc", "level": "deep"}` and events like
+`{"event": "noise", "mode": "anc", "level": "deep"}`. `crates/budctl-android/src/json.rs` lists
+them all.
 
 - JSON keeps the boundary small, and it carries the same serde types the CLI's `--json` writes.
 - Rust picks the device with `budctl_core::select`, as the CLI does, so the messages ("not
@@ -80,8 +85,9 @@ Written from Android's API reference. No other app's code is read for it (rule 2
 - **Paired devices:** `BluetoothAdapter.getBondedDevices()` gives the name, alias, address and
   cached service UUIDs. Whether the buds are connected comes from the A2DP and headset profile
   proxies.
-- **Connect:** `createRfcommSocketToServiceRecord(uuid)`, for each of the model's
-  `rfcomm_uuids()`. Android runs the SDP lookup that `sdp.rs` does on Linux. `connect()` takes no
+- **Connect:** `createRfcommSocketToServiceRecord(uuid)`, for the first of the model's
+  `rfcomm_uuids()` that the buds list (Android caches their service UUIDs; with none cached yet,
+  the first one). Android runs the SDP lookup that `sdp.rs` does on Linux. `connect()` takes no
   timeout, so a watchdog closes the socket after 8 s, when `rfcomm.rs` gives up too.
 - **Reads with a timeout:** the socket's input stream has no read timeout. A reader thread puts
   what it reads in a queue, `recv(timeoutMs)` waits on the queue, and `close()` ends the thread.
@@ -173,10 +179,8 @@ Run on the phone with debug on, and paste the in-app log.
   - arm64 for the phone and the release APK; debug builds add x86_64 for the emulator.
   - The application id is `io.github.krolyxon.budctl`.
   - Released as an APK on GitHub, not on the Play Store.
-- **Open, before step 3:** rule 5 allows `unsafe` only in `transport/socket.rs`, and a JNI export
-  needs `#[unsafe(no_mangle)]`. The exports would be a second exception, in
-  `crates/budctl-android/src/lib.rs`, with nothing else unsafe in that crate. Only the owner can
-  allow it.
+  - Rule 5's second exception: the JNI exports' `#[unsafe(no_mangle)]`, in
+    `crates/budctl-android/src/lib.rs`, with nothing else unsafe in that crate.
 
 ## Not planned
 
