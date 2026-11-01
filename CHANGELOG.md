@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- An Android app, in `android/`: the desktop app's pages and look on a phone, with the same Rust
+  library inside, colors from your wallpaper, and no internet permission. There is no release build
+  of it yet; the README says how to build it.
+- budctl has an icon: the LED battery ring around a dot-matrix "b". `install.sh` and the PKGBUILD
+  install it for the launcher entry, and the README has a banner in the same dots.
+- With `--debug`, `budctl-gui` also shows each command, connect and failure between the frames.
+
 ## 0.1.3 (2026-11-01)
 
 The desktop app moves, the Nothing way: short, eased out, fading rather than sliding.

@@ -1,11 +1,15 @@
-# budctl
+<div align="center">
+  <img src="docs/logo.svg" width="320" alt="budctl">
+  <p>Control your wireless earbuds from Linux and Android, without the vendor app.</p>
+</div>
 
-Control your wireless earbuds from Linux, without the vendor app: noise control, EQ, game mode,
-touch controls, battery and more. There is a command-line tool, `budctl`, and a desktop app,
-`budctl-gui`, both built on the same library.
+Noise control, EQ, game mode, touch controls, battery and more. There is a command-line tool,
+`budctl`, a desktop app, `budctl-gui`, and an [Android app](#android-app), all built on the same
+library.
 
-- No telemetry and no account. budctl talks to your buds over Bluetooth, through BlueZ.
-- The settings live on the buds, so budctl works alongside the phone app.
+- No telemetry and no account. budctl talks to your buds over Bluetooth, through BlueZ on Linux.
+  The Android app does not even have the internet permission.
+- The settings live on the buds, so a change made on one device shows on the others.
 
 **Supported buds:** realme Buds T310. More are added as the author gets them.
 
@@ -22,8 +26,8 @@ x86_64 and aarch64 (glibc 2.35 or newer).
 curl -fsSL https://github.com/krolyxon/budctl/releases/latest/download/install.sh | sh
 ```
 
-This puts `budctl` and `budctl-gui` in `~/.local/bin`, and a launcher entry in
-`~/.local/share/applications`. The download is checked against its SHA-256 checksum. Options:
+This puts `budctl` and `budctl-gui` in `~/.local/bin`, and a launcher entry and its icon in
+`~/.local/share`. The download is checked against its SHA-256 checksum. Options:
 
 ```sh
 sh install.sh --version 0.1.1        # a given release instead of the latest
@@ -139,6 +143,35 @@ closed) to `~/.local/state/budctl/gui.log`, replacing the last launch's.
 Other options: `--demo` shows made-up buds without Bluetooth; `--debug` and `--device` work as in
 the command-line tool.
 
+## Android app
+
+`android/` holds an Android app (Android 12 or newer) with the desktop app's pages and look, on a
+phone: the same Rust library runs inside it, and only the Bluetooth link and the screen are Kotlin.
+Its colors come from your wallpaper (Material You), or from the desktop app's near-black palette.
+
+<p align="center">
+  <img src="docs/screenshots/android-overview.png" width="240" alt="The Android app's Overview: the battery rings, noise control and its strength, and the switches">
+  <img src="docs/screenshots/android-equalizer.png" width="240" alt="The Android app's Equalizer: the presets, and a custom preset's six bands open below">
+  <img src="docs/screenshots/android-gestures.png" width="240" alt="The Android app's Gestures: what each tap and hold does on each bud, and what a hold steps through">
+</p>
+
+The app talks to the buds only while it is on screen, and frees their control channel 10 s after
+your last change or when you leave it, so your computer can use it. It has no internet permission,
+and its build fails if anything adds one. A switch on its App page turns on the debug log, which you
+can copy from there.
+
+There is no release build of it yet. To build it and put it on your phone (with USB debugging on),
+you need Android Studio or the Android SDK with its NDK, the Rust targets
+(`rustup target add aarch64-linux-android x86_64-linux-android`) and `cargo install cargo-ndk`:
+
+```sh
+cd android
+./gradlew installDebug
+```
+
+How it is put together: [`docs/android.md`](docs/android.md). The screenshots show made-up buds
+(`adb shell am start -n io.github.krolyxon.budctl/.MainActivity --ez demo true`).
+
 ## Config
 
 `~/.config/budctl/config.json` is created with the defaults the first time it is needed. Every key
@@ -171,7 +204,7 @@ how sure, is written down in [`docs/protocol/`](docs/protocol/): the
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
 
-The desktop app carries the Doto, Space Grotesk and Space Mono fonts, under the SIL Open Font
-License 1.1 ([`crates/budctl-gui/fonts/OFL.txt`](crates/budctl-gui/fonts/OFL.txt)). The Doto in it
-is a static instance (rounded dots, black weight, Latin only), renamed "Doto Rounded" as the
-license asks of modified fonts.
+The desktop and Android apps carry the Doto, Space Grotesk and Space Mono fonts, under the SIL
+Open Font License 1.1 ([`crates/budctl-gui/fonts/OFL.txt`](crates/budctl-gui/fonts/OFL.txt)). The
+Doto in them is a static instance (rounded dots, black weight, Latin only), renamed "Doto Rounded"
+as the license asks of modified fonts.
