@@ -6,7 +6,8 @@
 #   ./install.sh --source     in a checkout: builds with cargo, then installs
 #   ./install.sh --uninstall
 #
-# Installs into ~/.local by default (bin/ and share/applications/), so no root is needed.
+# Installs into ~/.local by default (bin/, and the launcher entry and its icon in share/), so no
+# root is needed.
 
 set -eu
 
@@ -25,7 +26,7 @@ Usage:
   install.sh --uninstall [--prefix DIR]
 
 Options:
-  --prefix DIR     Install into DIR/bin and DIR/share/applications (default: ~/.local)
+  --prefix DIR     Install into DIR/bin and DIR/share (default: ~/.local)
   --version X.Y.Z  Download this release instead of the latest
   --source         Build from this checkout with cargo instead of downloading
   --uninstall      Remove what install.sh installed. Your config (~/.config/budctl)
@@ -77,6 +78,8 @@ done
 
 BIN_DIR=$PREFIX/bin
 APP_DIR=$PREFIX/share/applications
+ICON_THEME=$PREFIX/share/icons/hicolor
+ICON_DIR=$ICON_THEME/scalable/apps
 
 # Use sudo only when the prefix cannot be written as this user (such as /usr/local).
 SUDO=
@@ -90,7 +93,7 @@ if [ ! -w "$writable_dir" ] && [ "$(id -u)" -ne 0 ]; then
 fi
 
 if [ "$ACTION" = uninstall ]; then
-    for file in "$BIN_DIR/budctl" "$BIN_DIR/budctl-gui" "$APP_DIR/budctl.desktop"; do
+    for file in "$BIN_DIR/budctl" "$BIN_DIR/budctl-gui" "$APP_DIR/budctl.desktop" "$ICON_DIR/budctl.svg"; do
         if [ -e "$file" ]; then
             $SUDO rm -f "$file"
             say "Removed $file"
@@ -118,6 +121,7 @@ case "$FROM" in
     bundle)
         FILES=$SCRIPT_DIR
         DESKTOP=$SCRIPT_DIR/budctl.desktop
+        ICON=$SCRIPT_DIR/budctl.svg
         ;;
     source)
         [ -f "$SCRIPT_DIR/Cargo.toml" ] || fail "--source needs a budctl checkout next to install.sh"
@@ -126,6 +130,7 @@ case "$FROM" in
         cargo build --release --locked --manifest-path "$SCRIPT_DIR/Cargo.toml" -p budctl -p budctl-gui
         FILES=$SCRIPT_DIR/target/release
         DESKTOP=$SCRIPT_DIR/contrib/budctl.desktop
+        ICON=$SCRIPT_DIR/docs/icon.svg
         ;;
     download)
         case "$(uname -m)" in
@@ -155,6 +160,7 @@ case "$FROM" in
         tar -xzf "$WORK/$ARCHIVE" -C "$WORK"
         FILES=$WORK/budctl-$TARGET
         DESKTOP=$FILES/budctl.desktop
+        ICON=$FILES/budctl.svg
         ;;
 esac
 
@@ -170,9 +176,23 @@ sed "s|^Exec=budctl-gui|Exec=$BIN_DIR/budctl-gui|" "$DESKTOP" >"$WORK/budctl.des
 $SUDO install -d "$BIN_DIR" "$APP_DIR"
 $SUDO install -m 0755 "$FILES/budctl" "$FILES/budctl-gui" "$BIN_DIR/"
 $SUDO install -m 0644 "$WORK/budctl.desktop" "$APP_DIR/budctl.desktop"
+# Releases from before the icon carry none; their launcher entry names a stock one instead.
+ICON_INSTALLED=
+if [ -f "$ICON" ]; then
+    $SUDO install -d "$ICON_DIR"
+    $SUDO install -m 0644 "$ICON" "$ICON_DIR/budctl.svg"
+    # A theme with an icon cache only sees a new icon once the cache is rebuilt.
+    if [ -f "$ICON_THEME/icon-theme.cache" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        $SUDO gtk-update-icon-cache -q -t "$ICON_THEME" || true
+    fi
+    ICON_INSTALLED=yes
+fi
 
 say "Installed $("$BIN_DIR/budctl" --version) to $BIN_DIR (budctl, budctl-gui)"
 say "Installed the launcher entry to $APP_DIR/budctl.desktop"
+if [ -n "$ICON_INSTALLED" ]; then
+    say "Installed the icon to $ICON_DIR/budctl.svg"
+fi
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *) say "Note: $BIN_DIR is not on your PATH. Add it to run budctl from a terminal." ;;
