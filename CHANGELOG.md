@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-11-01)
 
 The desktop app moves, the Nothing way: short, eased out, fading rather than sliding.
 
