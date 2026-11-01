@@ -149,7 +149,8 @@ is optional; a file with a mistake is reported and the defaults are used.
   "device": null,
   "gui": {
     "idle_seconds": 10,
-    "start_page": "overview"
+    "start_page": "overview",
+    "motion": true
   }
 }
 ```
@@ -158,6 +159,7 @@ is optional; a file with a mistake is reported and the defaults are used.
 - `gui.idle_seconds`: how long the app keeps the control channel open after the last change
   (1–600).
 - `gui.start_page`: `overview`, `equalizer`, `gestures`, `earbuds` or `settings`.
+- `gui.motion`: `false` turns the app's animations off; every change then shows at once.
 
 ## How it works
 

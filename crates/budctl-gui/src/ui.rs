@@ -1,14 +1,18 @@
 //! The building blocks every page uses, in Nothing OS's shapes: caps labels, dot-matrix words,
 //! round cards, rows with their icon in a circle, pill switches, pill tracks and chips.
 //! Everything takes its colors from the [`Look`].
+//!
+//! What can be pressed sits on a [`motion::eased`] surface, so its hover and its changes of
+//! state fade rather than snap.
 
-use iced::alignment::Horizontal;
 use iced::widget::{Column, Row, Stack, button, column, container, row, space, text};
-use iced::{Alignment, Border, Color, Element, Length};
+use iced::{Alignment, Border, Color, Element, Length, Theme};
 
 use crate::Message;
+use crate::dots;
 use crate::icons::{self, Icon};
-use crate::theme::{Look, Palette};
+use crate::motion::{self, Paint};
+use crate::theme::Look;
 
 /// Round corners: cards, and the rows in them.
 const CARD: f32 = 28.0;
@@ -102,7 +106,8 @@ pub fn scrim<'a>(look: Look, content: Element<'a, Message>, width: f32) -> Eleme
     container(container(content).width(width))
         .center(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(Color { a: 0.74, ..bg }.into()),
+            // As clear as the background is: a dialog fading in brings its dimming with it.
+            background: Some(Color { a: 0.74 * bg.a, ..bg }.into()),
             ..container::Style::default()
         })
         .into()
@@ -154,62 +159,45 @@ pub fn list_row<'a>(
         p.s2
     };
     let glyph = if current { p.fill_fg } else { p.fg };
-    let content = row![disc(icons::icon(icon, 20.0, glyph), 44.0, circle), words, trailing]
-        .spacing(14)
-        .align_y(Alignment::Center)
-        .padding([6, 14]);
+    let content = row![
+        disc(look, icons::icon(icon, 20.0, glyph), 44.0, circle),
+        words,
+        trailing
+    ]
+    .spacing(14)
+    .align_y(Alignment::Center)
+    .padding([6, 14]);
     let content = container(content).padding([0, 6]);
-    button(content)
+    let interactive = on_press.is_some();
+    let rest = Paint::fill(if focused { p.s3 } else { Color::TRANSPARENT }).framed(p.fill, focused);
+    let hover = Paint { fill: p.s3, ..rest };
+    let row = button(content)
         .on_press_maybe(on_press)
         .padding(0)
         .width(Length::Fill)
-        .style(move |_, status| button::Style {
-            background: (focused || hovered(status)).then_some(p.s3.into()),
-            text_color: p.fg,
-            border: cursor(p, focused, CARD),
-            ..button::Style::default()
-        })
-        .into()
+        .style(bare(p.fg));
+    motion::eased(row, rest, hover, CARD, interactive, look.motion)
 }
 
 /// `content` centered in a circle `size` across.
-fn disc<'a>(content: Element<'a, Message>, size: f32, color: Color) -> Element<'a, Message> {
-    container(content)
-        .center(size)
-        .style(move |_| surface(color, ROUND))
-        .into()
+fn disc<'a>(look: Look, content: Element<'a, Message>, size: f32, color: Color) -> Element<'a, Message> {
+    motion::surface(container(content).center(size), Paint::fill(color), ROUND, look.motion)
 }
 
-/// The keyboard cursor: a 2 px frame in the fill color. No frame without it.
-fn cursor(p: Palette, focused: bool, radius: f32) -> Border {
-    Border {
-        color: p.fill,
-        width: if focused { 2.0 } else { 0.0 },
-        radius: radius.into(),
+/// A button with no paint of its own: the [`motion::eased`] surface under it paints it.
+fn bare(text_color: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, _| button::Style {
+        background: None,
+        text_color,
+        border: Border::default(),
+        ..button::Style::default()
     }
-}
-
-fn hovered(status: button::Status) -> bool {
-    matches!(status, button::Status::Hovered | button::Status::Pressed)
 }
 
 /// An on/off switch: off, a dark pill with a dim knob on the left; on, the fill runs to the
 /// right end, with a dot in it. It only shows the state: the row around it takes the click.
 pub fn switch<'a>(look: Look, on: bool) -> Element<'a, Message> {
-    let p = look.p;
-    let knob = container(on.then(|| dot(p.fill_fg, 10.0)))
-        .width(if on { Length::Fill } else { Length::Fixed(26.0) })
-        .height(26)
-        .align_x(Horizontal::Right)
-        .align_y(Alignment::Center)
-        .padding([0, 8])
-        .style(move |_| surface(if on { p.fill } else { p.mute }, ROUND));
-    container(knob)
-        .width(64)
-        .height(34)
-        .padding(4)
-        .style(move |_| surface(p.s2, ROUND))
-        .into()
+    dots::switch(look, on)
 }
 
 /// A chevron: the row opens a page.
@@ -245,27 +233,19 @@ pub fn segmented<'a>(look: Look, segments: Vec<Segment<'a>>, large: bool, focuse
             .on_press(segment.on_press)
             .width(Length::Fill)
             .padding(if large { [14, 8] } else { [10, 12] })
-            .style(move |_, status| button::Style {
-                background: if selected {
-                    Some(p.fill.into())
-                } else {
-                    hovered(status).then_some(p.s3.into())
-                },
-                text_color: color,
-                border: Border::default().rounded(ROUND),
-                ..button::Style::default()
-            });
-        choices = choices.push(choice);
+            .style(bare(color));
+        // The chosen cell's fill fades out as the next one's fades in.
+        let rest = Paint::fill(if selected { p.fill } else { Color::TRANSPARENT });
+        let hover = Paint::fill(if selected { p.fill } else { p.s3 });
+        choices = choices.push(motion::eased(choice, rest, hover, ROUND, true, look.motion));
     }
-    container(choices)
-        .padding(6)
-        .width(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(p.s2.into()),
-            border: cursor(p, focused, ROUND),
-            ..container::Style::default()
-        })
-        .into()
+    let track = Paint::fill(p.s2).framed(p.fill, focused);
+    motion::surface(
+        container(choices).padding(6).width(Length::Fill),
+        track,
+        ROUND,
+        look.motion,
+    )
 }
 
 /// A page in the sidebar: a dot-matrix word, large with the live dot when open.
@@ -282,17 +262,13 @@ pub fn nav_item<'a>(look: Look, word: &str, open: bool, on_press: Message) -> El
             .align_y(Alignment::Center)
             .into()
     };
-    button(content)
+    let item = button(content)
         .on_press(on_press)
         .width(Length::Fill)
         .padding([6, 10])
-        .style(move |_, status| button::Style {
-            background: (!open && hovered(status)).then_some(p.s1.into()),
-            text_color: p.fg,
-            border: Border::default().rounded(CARD),
-            ..button::Style::default()
-        })
-        .into()
+        .style(bare(p.fg));
+    let hover = if open { Paint::NONE } else { Paint::fill(p.s1) };
+    motion::eased(item, Paint::NONE, hover, CARD, true, look.motion)
 }
 
 /// A chip: a caps label in a pill. `filled` with the fill color, for the main action, or on a
@@ -305,51 +281,36 @@ pub fn pill<'a>(look: Look, words: &str, filled: bool, on_press: Message) -> Ele
 pub fn pill_with<'a>(look: Look, words: &str, filled: bool, focused: bool, on_press: Message) -> Element<'a, Message> {
     let p = look.p;
     let color = if filled { p.fill_fg } else { p.fg };
-    button(label(look, words, 11.0, color))
+    let pill = button(label(look, words, 11.0, color))
         .on_press(on_press)
         .padding([10, 18])
-        .style(move |_, status| button::Style {
-            background: Some(match (filled, hovered(status)) {
-                (true, _) => p.fill.into(),
-                (false, true) => p.mute.into(),
-                (false, false) => p.s3.into(),
-            }),
-            text_color: color,
-            border: cursor(p, focused, ROUND),
-            ..button::Style::default()
-        })
-        .into()
+        .style(bare(color));
+    let rest = Paint::fill(if filled { p.fill } else { p.s3 }).framed(p.fill, focused);
+    let hover = Paint::fill(if filled { p.fill } else { p.mute }).framed(p.fill, focused);
+    motion::eased(pill, rest, hover, ROUND, true, look.motion)
 }
 
 /// A round button with just an icon, like the pencil on a preset's row.
 pub fn icon_button<'a>(look: Look, icon: Icon, focused: bool, on_press: Message) -> Element<'a, Message> {
     let p = look.p;
-    button(container(icons::icon(icon, 18.0, p.fg)).center(40))
+    let round = button(container(icons::icon(icon, 18.0, p.fg)).center(40))
         .on_press(on_press)
         .padding(0)
-        .style(move |_, status| button::Style {
-            background: Some(if focused || hovered(status) { p.mute } else { p.s2 }.into()),
-            text_color: p.fg,
-            border: cursor(p, focused, ROUND),
-            ..button::Style::default()
-        })
-        .into()
+        .style(bare(p.fg));
+    let rest = Paint::fill(if focused { p.mute } else { p.s2 }).framed(p.fill, focused);
+    let hover = Paint::fill(p.mute).framed(p.fill, focused);
+    motion::eased(round, rest, hover, ROUND, true, look.motion)
 }
 
 /// A wide chip, like "Refresh".
 pub fn wide_button<'a>(look: Look, words: &str, on_press: Message) -> Element<'a, Message> {
     let p = look.p;
-    button(container(label(look, words, 11.0, p.fg)).center_x(Length::Fill))
+    let wide = button(container(label(look, words, 11.0, p.fg)).center_x(Length::Fill))
         .on_press(on_press)
         .width(Length::Fill)
         .padding([11, 12])
-        .style(move |_, status| button::Style {
-            background: Some(if hovered(status) { p.mute } else { p.s3 }.into()),
-            text_color: p.fg,
-            border: Border::default().rounded(ROUND),
-            ..button::Style::default()
-        })
-        .into()
+        .style(bare(p.fg));
+    motion::eased(wide, Paint::fill(p.s3), Paint::fill(p.mute), ROUND, true, look.motion)
 }
 
 /// A filled circle, like the "connected" light or the live dot.

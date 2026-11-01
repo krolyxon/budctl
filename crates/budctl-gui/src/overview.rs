@@ -202,6 +202,7 @@ fn bass_level<'a>(look: Look, (low, high): (i8, i8), level: Option<i8>, marks: M
         release: Message::SaveBass,
         on: p.fill,
         off: p.s3,
+        motion: look.motion,
     };
     let control = row![container(ui::value(look, &shown)).align_right(76), slider.view(200.0)]
         .spacing(14)

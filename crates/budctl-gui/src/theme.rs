@@ -216,9 +216,48 @@ const DOT: Font = Font {
 #[derive(Debug, Clone, Copy)]
 pub struct Look {
     pub p: Palette,
+    /// Whether things move: off, every change shows at once (`gui.motion`, and the tests).
+    pub motion: bool,
 }
 
 impl Look {
+    /// The look of something fading in or out, `t` of the way visible (0 to 1).
+    ///
+    /// Surfaces (the dimming behind a dialog, cards, circles) come in twice as fast as what is
+    /// on them, so a card is solid by halfway and its words fade in on it, never through to
+    /// what is under it. Going out, the words go first, then the card.
+    pub fn fade(self, t: f32) -> Look {
+        let t = t.clamp(0.0, 1.0);
+        if t >= 1.0 {
+            return self;
+        }
+        let surface = (t * 2.0).min(1.0);
+        let s = |c: Color| Color { a: c.a * surface, ..c };
+        let f = |c: Color| Color { a: c.a * t, ..c };
+        let p = self.p;
+        Look {
+            p: Palette {
+                bg: s(p.bg),
+                s1: s(p.s1),
+                s2: s(p.s2),
+                s3: s(p.s3),
+                mute: f(p.mute),
+                grey: f(p.grey),
+                fg: f(p.fg),
+                fg_dim: f(p.fg_dim),
+                fill: f(p.fill),
+                fill_fg: f(p.fill_fg),
+                container: s(p.container),
+                container_fg: f(p.container_fg),
+                live: f(p.live),
+                live_fg: f(p.live_fg),
+                err: f(p.err),
+                err_fg: f(p.err_fg),
+            },
+            ..self
+        }
+    }
+
     pub fn medium(self) -> Font {
         Font {
             weight: Weight::Medium,
@@ -260,6 +299,27 @@ pub fn iced_theme(p: &Palette) -> iced::Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fading_only_makes_colors_clearer() {
+        let look = Look {
+            p: BUILT_IN,
+            motion: true,
+        };
+        assert_eq!(look.fade(1.0).p, BUILT_IN);
+        let half = look.fade(0.5).p;
+        assert_eq!(half.fg, Color { a: 0.5, ..BUILT_IN.fg });
+        assert_eq!(
+            half.live,
+            Color {
+                a: 0.5,
+                ..BUILT_IN.live
+            }
+        );
+        assert_eq!(half.s1, BUILT_IN.s1, "a card is solid by halfway");
+        assert_eq!(look.fade(0.25).p.s1.a, 0.5);
+        assert_eq!(look.fade(-1.0).p.s1.a, 0.0);
+    }
 
     #[test]
     fn reads_the_aurora_keys() {

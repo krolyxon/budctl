@@ -48,10 +48,11 @@ pub fn edited(buds: &Buds, editing: Option<u8>) -> Option<&EqPreset> {
     buds.preset(editing?).filter(|preset| preset.custom)
 }
 
-/// `editing`: the custom preset whose bands are open; `draft`: bands moved on the screen and not
-/// saved on the buds yet.
+/// `editing`: the custom preset whose bands are open, drawn in `opened` (they fade in when
+/// opened); `draft`: bands moved on the screen and not saved on the buds yet.
 pub fn view<'a>(
     look: Look,
+    opened: Look,
     buds: &'a Buds,
     editing: Option<u8>,
     draft: Option<&'a Draft>,
@@ -113,7 +114,7 @@ pub fn view<'a>(
         })
         .collect();
     let editor: Option<Element<'a, Message>> = match edited(buds, editing) {
-        Some(preset) => Some(bands(look, preset, draft, marks)),
+        Some(preset) => Some(bands(opened, preset, draft, marks)),
         None if eq.presets.iter().any(|p| p.custom) => Some(
             container(ui::note(
                 look,
@@ -206,6 +207,7 @@ fn bands<'a>(look: Look, preset: &'a EqPreset, draft: Option<&'a Draft>, marks: 
             release: Message::SaveBands(id),
             on: p.fill,
             off: p.s3,
+            motion: look.motion,
         };
         let band = column![
             ui::num(look, &gain(band.gain), 28.0, p.fg),

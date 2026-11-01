@@ -1,10 +1,11 @@
 //! The Earbud settings page: dual connection and its devices, find the buds, and what they run.
 
 use budctl_core::status::DualDevice;
-use iced::Element;
-use iced::widget::{column, container};
+use iced::widget::{column, container, row};
+use iced::{Alignment, Element};
 
 use crate::buds::Buds;
+use crate::dots;
 use crate::icons::Icon;
 use crate::theme::Look;
 use crate::ui;
@@ -54,7 +55,18 @@ pub fn view<'a>(look: Look, buds: &'a Buds, ringing: bool, marks: Marks) -> Elem
         Icon::Find,
         "Find my earbuds",
         Some(about.to_owned()),
-        ui::pill(look, if ringing { "Stop" } else { "Ring" }, ringing, Message::Find),
+        row![]
+            // A blinking live dot while the buds ring.
+            .push(ringing.then(|| dots::blink(look, look.p.live, 8.0)))
+            .push(ui::pill(
+                look,
+                if ringing { "Stop" } else { "Ring" },
+                ringing,
+                Message::Find,
+            ))
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .into(),
         None,
         marks.focus == Some(Item::Find),
     );

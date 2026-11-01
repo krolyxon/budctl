@@ -13,6 +13,7 @@ mod icons;
 mod kept;
 mod keys;
 mod log;
+mod motion;
 mod overview;
 mod settings;
 mod theme;
@@ -87,6 +88,7 @@ fn main() -> ExitCode {
         Page::Overview
     });
     let idle = Duration::from_secs(config.gui.idle_seconds);
+    let motion = config.gui.motion;
     let device = options.device.or_else(|| config.device().unwrap_or_default());
     if options.theme.is_none() {
         write_built_in_theme();
@@ -96,6 +98,7 @@ fn main() -> ExitCode {
         let mut app = App::new(theme_file.clone(), device, options.demo);
         app.page = start_page;
         app.idle = idle;
+        app.look.motion = motion;
         app
     };
     let mut application = iced::application(boot, App::update, App::view);
@@ -295,6 +298,41 @@ enum NameTarget {
     Rename(u8),
 }
 
+/// A dialog over the window.
+#[derive(Debug, Clone, PartialEq)]
+enum Overlay {
+    /// The list of keys.
+    Help,
+    /// "Ring the buds?".
+    Find,
+    /// The preset-name dialog, with its heading and its button.
+    Name {
+        heading: String,
+        action: &'static str,
+        prompt: NamePrompt,
+    },
+    /// "Delete the preset?", for the preset of this name.
+    Delete(String),
+    /// "Turn dual connection off?".
+    Dual,
+}
+
+impl Overlay {
+    /// Whether `other` is the same dialog, whatever it shows now (the name typed so far).
+    fn same(&self, other: &Overlay) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+
+/// What the window shows, in broad strokes: the parts that fade in or out when they change.
+struct Scene {
+    page: Page,
+    read: bool,
+    overlay: Option<Overlay>,
+    problem: bool,
+    bands: Option<u8>,
+}
+
 /// What a page needs besides the buds: the item under the keyboard cursor, if it shows, and the
 /// items with a write on its way.
 #[derive(Clone, Copy)]
@@ -396,6 +434,10 @@ enum Message {
     /// A mouse button went down: the mouse is in use, so the keyboard cursor hides.
     Pointer,
     CloseHelp,
+    /// A frame is drawn while something fades, at this time.
+    Frame(Instant),
+    /// Nothing: what a dialog fading out sends, if pressed.
+    Noop,
 }
 
 struct App {
@@ -445,6 +487,18 @@ struct App {
     editing: Option<u8>,
     /// "Turn dual connection off?" is open.
     confirm_dual: bool,
+    /// The time the fades are drawn at: of the last frame, or of the last fade begun.
+    now: Instant,
+    /// The page fading in, since when, and the page open before it.
+    page_fade: Option<(Instant, Page)>,
+    /// When the open dialog began fading in.
+    overlay_since: Option<Instant>,
+    /// A dialog fading out, as it was, and since when.
+    closing: Option<(Overlay, Instant)>,
+    /// When the problem above the page began fading in.
+    problem_since: Option<Instant>,
+    /// When the open bands of a custom preset began fading in.
+    bands_since: Option<Instant>,
 }
 
 impl App {
@@ -461,7 +515,10 @@ impl App {
             page: Page::Overview,
             buds,
             anc_level,
-            look: Look { p: theme::BUILT_IN },
+            look: Look {
+                p: theme::BUILT_IN,
+                motion: false,
+            },
             theme: theme::iced_theme(&theme::BUILT_IN),
             palette: theme::Source::new(theme_file),
             keys: keys::Keys::default(),
@@ -484,12 +541,26 @@ impl App {
             confirm_delete: None,
             editing: None,
             confirm_dual: false,
+            now: Instant::now(),
+            page_fade: None,
+            overlay_since: None,
+            closing: None,
+            problem_since: None,
+            bands_since: None,
         };
         app.refresh_palette();
         app
     }
 
+    /// Acts on `message`, then starts the fades for what it changed.
     fn update(&mut self, message: Message) -> Task<Message> {
+        let before = self.scene();
+        let task = self.apply(message);
+        self.begin_fades(before);
+        task
+    }
+
+    fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Open(page) => return self.open(page),
             Message::Noise(mode) => self.write(Item::NoiseMode, Command::Noise(mode)),
@@ -579,8 +650,111 @@ impl App {
             Message::Key(key, modifiers) => return self.key(&key, modifiers),
             Message::Pointer => self.cursor_shown = false,
             Message::CloseHelp => self.help = false,
+            Message::Frame(now) => self.frame(now),
+            Message::Noop => {}
         }
         Task::none()
+    }
+
+    fn scene(&self) -> Scene {
+        Scene {
+            page: self.page,
+            read: self.has_reading(),
+            overlay: self.overlay(),
+            problem: self.problem_shown(),
+            bands: self.editing,
+        }
+    }
+
+    /// Starts the fades for what changed since `before`: the page or its first reading, a
+    /// dialog opening or closing, the problem above the page, the bands of a preset opening.
+    fn begin_fades(&mut self, before: Scene) {
+        if !self.look.motion {
+            return;
+        }
+        let after = self.scene();
+        let now = Instant::now();
+        if (after.page, after.read) != (before.page, before.read) {
+            self.page_fade = Some((now, before.page));
+        }
+        match (before.overlay, &after.overlay) {
+            (Some(old), Some(new)) if old.same(new) => {}
+            (_, Some(_)) => {
+                self.overlay_since = Some(now);
+                self.closing = None;
+            }
+            (Some(old), None) => {
+                self.overlay_since = None;
+                self.closing = Some((old, now));
+            }
+            (None, None) => {}
+        }
+        if after.problem && !before.problem {
+            self.problem_since = Some(now);
+        }
+        if after.bands.is_some() && after.bands != before.bands {
+            self.bands_since = Some(now);
+        }
+        if self.fading() {
+            self.now = self.now.max(now);
+        }
+    }
+
+    /// A frame of the fades, at `now`: the ones over are dropped.
+    fn frame(&mut self, now: Instant) {
+        self.now = now;
+        let going = |since: &Instant, length| !motion::over(*since, length, now);
+        self.page_fade = self.page_fade.filter(|(since, _)| going(since, motion::PAGE));
+        self.overlay_since = self.overlay_since.filter(|since| going(since, motion::OPEN));
+        self.closing = self.closing.take().filter(|(_, since)| going(since, motion::CLOSE));
+        self.problem_since = self.problem_since.filter(|since| going(since, motion::OPEN));
+        self.bands_since = self.bands_since.filter(|since| going(since, motion::OPEN));
+    }
+
+    /// Whether something fades: the window then wants every frame.
+    fn fading(&self) -> bool {
+        self.page_fade.is_some()
+            || self.overlay_since.is_some()
+            || self.closing.is_some()
+            || self.problem_since.is_some()
+            || self.bands_since.is_some()
+    }
+
+    /// How far a fade that began at `since` and lasts `length` is (0 to 1); 1 for none.
+    fn shown(&self, since: Option<Instant>, length: Duration) -> f32 {
+        since.map_or(1.0, |since| motion::progress(since, length, self.now))
+    }
+
+    /// The dialog open, if one is: the first of them, as the keys take them.
+    fn overlay(&self) -> Option<Overlay> {
+        if self.help {
+            return Some(Overlay::Help);
+        }
+        if self.confirm_find {
+            return Some(Overlay::Find);
+        }
+        if let Some(prompt) = &self.prompt {
+            let (heading, action) = match prompt.target {
+                NameTarget::New => ("New preset".to_owned(), "Create"),
+                NameTarget::Rename(id) => {
+                    let name = self.buds.preset(id).map_or("the preset", |preset| preset.name.as_str());
+                    (format!("Rename {name}"), "Rename")
+                }
+            };
+            return Some(Overlay::Name {
+                heading,
+                action,
+                prompt: prompt.clone(),
+            });
+        }
+        if let Some(id) = self.confirm_delete {
+            let name = self
+                .buds
+                .preset(id)
+                .map_or("this preset", |preset| preset.name.as_str());
+            return Some(Overlay::Delete(name.to_owned()));
+        }
+        self.confirm_dual.then_some(Overlay::Dual)
     }
 
     /// Changes a setting: at once with the made-up buds, else through the worker. Until the buds
@@ -1273,16 +1447,22 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let events = event::listen_with(|event, _status, _window| on_event(event));
-        if self.link == Link::Demo {
-            return events;
+        let mut subscriptions = vec![event::listen_with(|event, _status, _window| on_event(event))];
+        if self.link != Link::Demo {
+            subscriptions.push(Subscription::run_with((self.device, self.idle), worker::run).map(Message::Worker));
         }
-        let worker = Subscription::run_with((self.device, self.idle), worker::run).map(Message::Worker);
-        Subscription::batch([events, worker])
+        // Every frame while something fades, and none once it is over: the window rests.
+        if self.fading() {
+            subscriptions.push(window::frames().map(Message::Frame));
+        }
+        Subscription::batch(subscriptions)
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let look = self.look;
+        // The page fades in when opened, and when its first reading comes.
+        let look = self
+            .look
+            .fade(self.shown(self.page_fade.map(|(since, _)| since), motion::PAGE));
         let pending = self.pending();
         let page = match self.page {
             Page::Overview if self.has_reading() => {
@@ -1292,13 +1472,14 @@ impl App {
                 };
                 overview::view(look, &self.buds, self.anc_level, self.bass_draft, marks)
             }
-            Page::Overview => self.connecting(),
+            Page::Overview => self.connecting(look),
             Page::Equalizer if self.has_reading() => {
                 let marks = Marks {
                     focus: self.focus(),
                     pending: &pending,
                 };
-                equalizer::view(look, &self.buds, self.editing, self.draft.as_ref(), marks)
+                let bands = look.fade(self.shown(self.bands_since, motion::OPEN));
+                equalizer::view(look, bands, &self.buds, self.editing, self.draft.as_ref(), marks)
             }
             Page::Gestures if self.has_reading() => {
                 let marks = Marks {
@@ -1328,8 +1509,9 @@ impl App {
             .spacing(16)
             .into(),
         };
-        let page = column![self.problem(), page].spacing(20);
-        let p = look.p;
+        let problem = look.fade(self.shown(self.problem_since, motion::OPEN));
+        let page = column![self.problem(problem), page].spacing(20);
+        let p = self.look.p;
         let content = scrollable(
             container(container(page).max_width(860))
                 .center_x(Length::Fill)
@@ -1354,24 +1536,22 @@ impl App {
                 background: Some(p.bg.into()),
                 ..container::Style::default()
             });
-        if self.help {
-            stack![window, self.help()].into()
-        } else if self.confirm_find {
-            stack![window, self.confirm_find()].into()
-        } else if let Some(prompt) = &self.prompt {
-            stack![window, self.name_prompt(prompt)].into()
-        } else if let Some(id) = self.confirm_delete {
-            stack![window, self.confirm_delete(id)].into()
-        } else if self.confirm_dual {
-            stack![window, self.confirm_dual()].into()
+        // A dialog fades in over the dimmed window; closed, it fades out, and nothing in it
+        // answers any more.
+        if let Some(overlay) = self.overlay() {
+            let look = self.look.fade(self.shown(self.overlay_since, motion::OPEN));
+            stack![window, opaque(overlay_view(look, overlay))].into()
+        } else if let Some((overlay, since)) = &self.closing {
+            let look = self.look.fade(1.0 - motion::progress(*since, motion::CLOSE, self.now));
+            let fading = overlay_view(look, overlay.clone()).map(|_| Message::Noop);
+            stack![window, fading].into()
         } else {
             window.into()
         }
     }
 
     /// The Overview before the first reading: connecting, or why it did not work.
-    fn connecting(&self) -> Element<'_, Message> {
-        let look = self.look;
+    fn connecting(&self, look: Look) -> Element<'_, Message> {
         let p = look.p;
         let (headline, detail) = match &self.link {
             Link::Failed {
@@ -1393,7 +1573,7 @@ impl App {
         let state = if failed {
             row![ui::dot(p.err, 10.0), ui::label(look, "no link", 11.0, p.err)]
         } else {
-            row![ui::dot(p.live, 10.0), ui::label(look, "searching", 11.0, p.live)]
+            row![dots::scan(look, p.live), ui::label(look, "searching", 11.0, p.live)]
         };
         let words = column![
             state.spacing(10).align_y(Alignment::Center),
@@ -1409,14 +1589,18 @@ impl App {
         .into()
     }
 
+    /// Whether a failure shows above the page: see [`App::problem`].
+    fn problem_shown(&self) -> bool {
+        matches!(self.link, Link::Failed { .. }) && self.read_at.is_some()
+    }
+
     /// A failure after the buds were read once: what went wrong, above the page.
-    fn problem(&self) -> Option<Element<'_, Message>> {
+    fn problem(&self, look: Look) -> Option<Element<'_, Message>> {
         let Link::Failed { message, .. } = &self.link else {
             return None;
         };
         // Before the first reading, the Overview says it already.
         self.read_at?;
-        let look = self.look;
         let p = look.p;
         let content = row![
             ui::dot(p.err, 10.0),
@@ -1451,7 +1635,12 @@ impl App {
         let device = column![
             text(self.buds.name.as_str()).size(18).font(look.semibold()).color(p.fg),
             row![
-                ui::dot(light, 8.0),
+                // Blinking while it looks for the buds, like a recording light.
+                if self.link == Link::Connecting {
+                    dots::blink(look, light, 8.0)
+                } else {
+                    ui::dot(light, 8.0)
+                },
                 ui::label(look, state, 11.0, p.grey),
                 space::horizontal()
             ]
@@ -1462,7 +1651,15 @@ impl App {
         ]
         .spacing(14)
         .padding([0, 10]);
+        // The page opened and the one left fade in at their new sizes, with the page.
+        let changed = self
+            .page_fade
+            .map(|(since, from)| (from, self.shown(Some(since), motion::PAGE)));
         let pages = Page::ALL.into_iter().fold(Column::new().spacing(2), |pages, page| {
+            let look = match changed {
+                Some((from, t)) if page == from || page == self.page => look.fade(t),
+                _ => look,
+            };
             pages.push(ui::nav_item(look, page.word(), page == self.page, Message::Open(page)))
         });
         let hint = container(ui::label(look, "? keys · q quit", 10.5, p.grey)).padding([0, 10]);
@@ -1472,128 +1669,122 @@ impl App {
             .height(Length::Fill)
             .into()
     }
+}
 
-    /// A dialog over the dimmed window: heading, words, and Cancel beside the main action.
-    fn dialog<'a>(
-        &self,
-        heading: String,
-        words: &'a str,
-        answer: fn(bool) -> Message,
-        action: &'a str,
-    ) -> Element<'a, Message> {
-        let look = self.look;
-        let buttons = row![
-            space::horizontal(),
-            ui::pill(look, "Cancel", false, answer(false)),
-            ui::pill(look, action, true, answer(true)),
-        ]
-        .spacing(10);
-        let body = column![ui::headline(look, heading), ui::note(look, words)].spacing(10);
-        let dialog = ui::panel(look, column![body, buttons].spacing(26).into());
-        opaque(ui::scrim(look, dialog, 480.0))
-    }
-
-    /// "Ring the buds?": the sound is loud enough to hurt in the ears.
-    fn confirm_find(&self) -> Element<'_, Message> {
-        self.dialog(
+/// A dialog, `look` as it fades.
+fn overlay_view<'a>(look: Look, overlay: Overlay) -> Element<'a, Message> {
+    match overlay {
+        Overlay::Help => help(look),
+        // The sound is loud enough to hurt in the ears.
+        Overlay::Find => dialog(
+            look,
             "Ring your buds?".to_owned(),
             "Take them out of your ears first: the sound is loud. They ring until you press Stop.",
             Message::ConfirmFind,
             "Ring",
-        )
-    }
-
-    /// "Turn dual connection off?": with two devices connected, the buds may drop one.
-    fn confirm_dual(&self) -> Element<'_, Message> {
-        self.dialog(
-            "Turn dual connection off?".to_owned(),
-            "If two devices are connected to your buds, they may drop one of them.",
-            Message::ConfirmDual,
-            "Turn off",
-        )
-    }
-
-    /// "Delete the preset?": its bands are lost.
-    fn confirm_delete(&self, id: u8) -> Element<'_, Message> {
-        let name = self
-            .buds
-            .preset(id)
-            .map_or("this preset", |preset| preset.name.as_str());
-        self.dialog(
+        ),
+        Overlay::Name {
+            heading,
+            action,
+            prompt,
+        } => name_prompt(look, heading, action, &prompt),
+        // Its bands are lost.
+        Overlay::Delete(name) => dialog(
+            look,
             format!("Delete {name}?"),
             "Its bands are lost. The buds keep their other presets.",
             Message::ConfirmDelete,
             "Delete",
-        )
+        ),
+        // With two devices connected, the buds may drop one.
+        Overlay::Dual => dialog(
+            look,
+            "Turn dual connection off?".to_owned(),
+            "If two devices are connected to your buds, they may drop one of them.",
+            Message::ConfirmDual,
+            "Turn off",
+        ),
     }
+}
 
-    /// The dialog that asks for a preset's name, over a dimmed window.
-    fn name_prompt<'a>(&'a self, prompt: &'a NamePrompt) -> Element<'a, Message> {
-        let look = self.look;
-        let p = look.p;
-        let (heading, action) = match prompt.target {
-            NameTarget::New => ("New preset".to_owned(), "Create"),
-            NameTarget::Rename(id) => {
-                let name = self.buds.preset(id).map_or("the preset", |preset| preset.name.as_str());
-                (format!("Rename {name}"), "Rename")
-            }
-        };
-        let field = text_input("Name", &prompt.text)
-            .id(NAME_INPUT)
-            .on_input(Message::NameInput)
-            .on_submit(Message::SubmitName)
-            .size(16)
-            .padding([12, 20])
-            .style(move |_, _| text_input::Style {
-                background: p.s2.into(),
-                border: Border {
-                    color: p.fill,
-                    width: 1.0,
-                    radius: 999.0.into(),
-                },
-                icon: p.grey,
-                placeholder: p.grey,
-                value: p.fg,
-                selection: p.container,
-            });
-        let problem = prompt
-            .problem
-            .as_deref()
-            .map(|problem| container(text(problem).size(13).color(p.err)).padding([0, 20]));
-        let buttons = row![
-            space::horizontal(),
-            ui::pill(look, "Cancel", false, Message::CancelName),
-            ui::pill(look, action, true, Message::SubmitName),
-        ]
-        .spacing(10);
-        let dialog = column![ui::headline(look, heading), field]
-            .push(problem)
-            .push(buttons)
-            .spacing(18);
-        opaque(ui::scrim(look, ui::panel(look, dialog.into()), 480.0))
-    }
+/// A dialog over the dimmed window: heading, words, and Cancel beside the main action.
+fn dialog<'a>(
+    look: Look,
+    heading: String,
+    words: &'static str,
+    answer: fn(bool) -> Message,
+    action: &'static str,
+) -> Element<'a, Message> {
+    let buttons = row![
+        space::horizontal(),
+        ui::pill(look, "Cancel", false, answer(false)),
+        ui::pill(look, action, true, answer(true)),
+    ]
+    .spacing(10);
+    let body = column![ui::headline(look, heading), ui::note(look, words)].spacing(10);
+    let dialog = ui::panel(look, column![body, buttons].spacing(26).into());
+    ui::scrim(look, dialog, 480.0)
+}
 
-    /// The list of keys, over a dimmed window. A key or a click closes it.
-    fn help(&self) -> Element<'_, Message> {
-        let look = self.look;
-        let p = look.p;
-        let rows = keys::HELP
-            .iter()
-            .fold(Column::new().spacing(10), |rows, &(keys, what)| {
-                rows.push(
-                    row![
-                        text(keys).size(13).font(look.mono()).color(p.fg).width(180),
-                        text(what).size(14).color(p.fg_dim)
-                    ]
-                    .align_y(Alignment::Center),
-                )
-            });
-        let heading = row![ui::num(look, "keys", 40.0, p.fg), ui::dot(p.live, 12.0)]
-            .spacing(12)
-            .align_y(Alignment::Center);
-        let list = ui::panel(look, column![heading, rows].spacing(22).into());
-        opaque(mouse_area(ui::scrim(look, list, 580.0)).on_press(Message::CloseHelp))
-    }
+/// The dialog that asks for a preset's name, over a dimmed window.
+fn name_prompt<'a>(look: Look, heading: String, action: &'static str, prompt: &NamePrompt) -> Element<'a, Message> {
+    let p = look.p;
+    let field = text_input("Name", &prompt.text)
+        .id(NAME_INPUT)
+        .on_input(Message::NameInput)
+        .on_submit(Message::SubmitName)
+        .size(16)
+        .padding([12, 20])
+        .style(move |_, _| text_input::Style {
+            background: p.s2.into(),
+            border: Border {
+                color: p.fill,
+                width: 1.0,
+                radius: 999.0.into(),
+            },
+            icon: p.grey,
+            placeholder: p.grey,
+            value: p.fg,
+            selection: p.container,
+        });
+    let problem = prompt
+        .problem
+        .clone()
+        .map(|problem| container(text(problem).size(13).color(p.err)).padding([0, 20]));
+    let buttons = row![
+        space::horizontal(),
+        ui::pill(look, "Cancel", false, Message::CancelName),
+        ui::pill(look, action, true, Message::SubmitName),
+    ]
+    .spacing(10);
+    let dialog = column![ui::headline(look, heading), field]
+        .push(problem)
+        .push(buttons)
+        .spacing(18);
+    ui::scrim(look, ui::panel(look, dialog.into()), 480.0)
+}
+
+/// The list of keys, over a dimmed window. A key or a click closes it.
+fn help<'a>(look: Look) -> Element<'a, Message> {
+    let p = look.p;
+    let rows = keys::HELP
+        .iter()
+        .fold(Column::new().spacing(10), |rows, &(keys, what)| {
+            rows.push(
+                row![
+                    text(keys).size(13).font(look.mono()).color(p.fg).width(180),
+                    text(what).size(14).color(p.fg_dim)
+                ]
+                .align_y(Alignment::Center),
+            )
+        });
+    let heading = row![ui::num(look, "keys", 40.0, p.fg), ui::dot(p.live, 12.0)]
+        .spacing(12)
+        .align_y(Alignment::Center);
+    let list = ui::panel(look, column![heading, rows].spacing(22).into());
+    mouse_area(ui::scrim(look, list, 580.0))
+        .on_press(Message::CloseHelp)
+        .into()
 }
 
 /// What a window event means to the window: focus, a key, a click.
@@ -1971,7 +2162,7 @@ mod tests {
             message: "control channel busy".to_owned(),
         }));
         assert!(matches!(app.link, Link::Failed { kind: Kind::Busy, .. }));
-        assert!(app.problem().is_none(), "the Overview says it, not a banner");
+        assert!(!app.problem_shown(), "the Overview says it, not a banner");
 
         let _ = commands.try_recv();
         let _ = app.update(Message::Refresh);
@@ -1987,7 +2178,7 @@ mod tests {
         assert!(app.pending().is_empty());
         assert!(switch(&app, "dual"));
         assert!(!app.buds.connected);
-        assert!(app.problem().is_some());
+        assert!(app.problem_shown());
     }
 
     #[test]
@@ -2413,6 +2604,80 @@ mod tests {
         let _ = saving.update(Message::Noise(NoiseMode::Off));
         shots.push(("saving".to_owned(), 1240.0, saving));
         render(&dir, shots);
+    }
+
+    /// The demo buds, with motion on.
+    fn moving() -> App {
+        let mut app = app();
+        app.look.motion = true;
+        app
+    }
+
+    /// A frame long after every fade began.
+    fn later() -> Message {
+        Message::Frame(Instant::now() + Duration::from_secs(5))
+    }
+
+    #[test]
+    fn pages_fade_in_and_the_window_rests_after() {
+        let mut app = moving();
+        assert!(!app.fading(), "nothing moves at the start");
+        let _ = app.update(Message::Open(Page::Equalizer));
+        assert_eq!(app.page_fade.map(|(_, from)| from), Some(Page::Overview));
+        assert!(app.fading());
+        let _ = app.update(later());
+        assert_eq!(app.page_fade, None);
+        assert!(!app.fading(), "no more frames once the fade is over");
+    }
+
+    #[test]
+    fn dialogs_fade_in_and_out() {
+        let mut app = moving();
+        let _ = app.update(Message::ShowHelp);
+        assert!(app.overlay_since.is_some());
+        let _ = app.update(Message::CloseHelp);
+        assert_eq!(app.overlay_since, None);
+        assert_eq!(app.closing.as_ref().map(|(overlay, _)| overlay), Some(&Overlay::Help));
+        let _ = app.update(later());
+        assert_eq!(app.closing, None);
+        assert!(!app.fading());
+
+        // Typing a name does not start the dialog over.
+        let _ = app.update(Message::NewPreset);
+        let opened = app.overlay_since;
+        assert!(opened.is_some());
+        let _ = app.update(Message::NameInput("Mine".to_owned()));
+        assert_eq!(app.overlay_since, opened);
+    }
+
+    #[test]
+    fn a_dialog_fading_out_keeps_what_it_said() {
+        let mut app = moving();
+        app.page = Page::Equalizer;
+        let name = app.buds.preset(4).unwrap().name.clone();
+        let _ = app.update(Message::DeletePreset(4));
+        let _ = app.update(Message::ConfirmDelete(true));
+        assert!(app.buds.preset(4).is_none(), "the demo buds delete at once");
+        assert_eq!(
+            app.closing.as_ref().map(|(overlay, _)| overlay),
+            Some(&Overlay::Delete(name))
+        );
+    }
+
+    #[test]
+    fn without_motion_nothing_fades() {
+        let mut app = app();
+        for message in [
+            Message::Open(Page::Earbuds),
+            Message::ShowHelp,
+            Message::CloseHelp,
+            Message::Find,
+            Message::ConfirmFind(false),
+        ] {
+            let _ = app.update(message);
+            assert!(!app.fading());
+        }
+        assert_eq!(app.closing, None);
     }
 
     /// The README's screenshots: the demo buds in the built-in palette, written to

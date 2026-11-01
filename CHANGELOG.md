@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+The desktop app moves, the Nothing way: short, eased out, fading rather than sliding.
+
+- Hovers, the chosen segment, the keyboard cursor and the current preset's circle fade instead
+  of snapping. Switches stretch from the knob into the fill as they turn.
+- Pages fade in when opened, and when the buds are first read; dialogs fade in and out, as do the
+  error above a page and the bands of a custom preset.
+- The battery rings light their dots one after the other, like the Glyph lights, when they first
+  show and when a level changes.
+- While the app looks for the buds, a row of dots scans and the sidebar's light blinks; a light
+  blinks beside Stop while the buds ring.
+- Nothing moves once a change has settled, so an idle window uses no CPU. `"gui": {"motion":
+  false}` in the config turns the animations off.
+
 ## 0.1.2 (2026-10-29)
 
 A new look for the desktop app, after Nothing OS in Material You colors, and a window that no

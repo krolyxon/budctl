@@ -30,6 +30,9 @@ pub struct Gui {
     pub idle_seconds: u64,
     /// The page the window opens on: `overview`, `equalizer`, `gestures`, `earbuds` or `settings`.
     pub start_page: String,
+    /// Whether things move: fades, switches, the battery rings' sweep. Off, every change shows
+    /// at once.
+    pub motion: bool,
 }
 
 impl Default for Gui {
@@ -37,6 +40,7 @@ impl Default for Gui {
         Gui {
             idle_seconds: 10,
             start_page: "overview".to_owned(),
+            motion: true,
         }
     }
 }
@@ -148,6 +152,8 @@ mod tests {
         assert_eq!(config.device().unwrap(), Some("AA:BB:CC:DD:EE:FF".parse().unwrap()));
         assert_eq!(config.gui.idle_seconds, 30);
         assert_eq!(config.gui.start_page, "overview");
+        assert!(config.gui.motion, "things move unless the file says not to");
+        assert!(!parse(r#"{"gui": {"motion": false}}"#).unwrap().gui.motion);
     }
 
     #[test]
