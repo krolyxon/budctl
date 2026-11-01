@@ -134,11 +134,18 @@ Written from Android's API reference. No other app's code is read for it (rule 2
 5. **The pages**, built the way the desktop app was: first the look with demo buds, then live
    buds, then one page at a time (Overview, Equalizer, Gestures, Earbuds, Settings).
    - The look is the desktop app's: Nothing OS shapes and type in Material You colors. The colors
-     come from Android's dynamic color (the phone's wallpaper palette), mapped to the same roles.
-   - The same fonts, from `crates/budctl-gui/fonts`. Battery rings, dotted sliders and pill
-     switches are drawn on Compose canvases, with `motion.rs`'s timings.
-   - Touch only: no vim keys.
-   - Claude checks the look on the emulator, with the demo buds, from adb screenshots.
+     come from Android's dynamic color (the phone's wallpaper palette), mapped to the same roles;
+     a switch on the APP page puts the built-in near-black palette back.
+   - The same fonts, from `crates/budctl-gui/fonts` (Gradle adds that folder to the assets). Icons,
+     battery rings, dotted sliders and pill switches are drawn on Compose canvases, with
+     `motion.rs`'s timings.
+   - The desktop's sidebar becomes a row of dot-matrix page words above the page. A swipe changes
+     the page, and the pages fade into each other rather than slide.
+   - Touch only: no vim keys. The APP page keeps the debug switch and the log, with a copy
+     button.
+   - Claude checks the look on the emulator with the demo buds, from adb screenshots: launch with
+     `--ez demo true`.
+   - Built so far: the look, the Overview and the APP page. Next: Equalizer, Gestures, Earbuds.
    *Done when* **A3** passes for every page.
 6. **Release.** One version for everything: Gradle reads it from `Cargo.toml`. CI builds and
    tests the app on every push, and a tag adds a signed APK to the GitHub release. The signing key

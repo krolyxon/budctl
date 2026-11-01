@@ -91,6 +91,8 @@ androidComponents {
             doFirst { environment("ANDROID_NDK_HOME", ndk.get().asFile.path) }
         }
         variant.sources.jniLibs?.addGeneratedSourceDirectory(cargo, CargoNdk::output)
+        // The desktop app's fonts and their license (OFL 1.1), shared rather than copied.
+        variant.sources.assets?.addStaticSourceDirectory(workspace.resolve("crates/budctl-gui/fonts").path)
 
         val check = tasks.register<CheckNoInternet>("check${name}NoInternet") {
             manifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
