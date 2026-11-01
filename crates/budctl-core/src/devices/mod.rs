@@ -3,7 +3,7 @@
 //! To support a new pair of buds, add one module here and list it in [`REGISTRY`]. Transport,
 //! CLI and GUI code do not change.
 
-use crate::bluez::PairedDevice;
+use crate::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
 use crate::status::{
@@ -21,7 +21,7 @@ pub trait Device: Sync {
     /// Model name, e.g. `realme Buds T310`.
     fn name(&self) -> &'static str;
 
-    /// Whether a paired device is this model, judged from BlueZ data alone.
+    /// Whether a paired device is this model, judged from what the system reports about it.
     fn matches(&self, device: &PairedDevice) -> bool;
 
     /// The control service(s), in the order to try. SDP turns each into an RFCOMM channel.

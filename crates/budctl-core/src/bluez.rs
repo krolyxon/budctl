@@ -10,24 +10,11 @@ use std::os::unix::net::UnixStream;
 use zbus::blocking::connection::Builder;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
-use crate::bt::BdAddr;
+use crate::PairedDevice;
 use crate::error::{Error, Result};
 
 /// The system bus. `DBUS_SYSTEM_BUS_ADDRESS` is deliberately ignored.
 const SYSTEM_BUS_SOCKET: &str = "/var/run/dbus/system_bus_socket";
-
-/// A device BlueZ has paired, as BlueZ describes it.
-#[derive(Debug, Clone)]
-pub struct PairedDevice {
-    pub address: BdAddr,
-    /// The name the device advertises. Device modules recognize models by this.
-    pub name: String,
-    /// The name the user gave it (BlueZ falls back to `name`). Shown to people.
-    pub alias: String,
-    pub connected: bool,
-    /// Service UUIDs BlueZ found, lowercase and hyphenated.
-    pub uuids: Vec<String>,
-}
 
 type Properties = HashMap<String, OwnedValue>;
 type ManagedObjects = HashMap<OwnedObjectPath, HashMap<String, Properties>>;

@@ -28,10 +28,13 @@ impl<'a> Reader<'a> {
         Ok(u16::from_le_bytes(self.array()?))
     }
 
+    /// Only SDP, which is Linux-only, reads big-endian numbers so far.
+    #[cfg(target_os = "linux")]
     pub(crate) fn u16_be(&mut self) -> Result<u16> {
         Ok(u16::from_be_bytes(self.array()?))
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn u32_be(&mut self) -> Result<u32> {
         Ok(u32::from_be_bytes(self.array()?))
     }
@@ -48,6 +51,8 @@ impl<'a> Reader<'a> {
         std::mem::take(&mut self.bytes)
     }
 
+    /// Only SDP checks that it read everything so far.
+    #[cfg(target_os = "linux")]
     pub(crate) fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }

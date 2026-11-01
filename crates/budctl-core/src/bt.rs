@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use serde::{Serialize, Serializer};
 
+#[cfg(target_os = "linux")]
 use crate::error::{Error, Result};
 
 /// A Bluetooth device address, kept in the order people write it (`AA:BB:CC:DD:EE:FF`).
@@ -19,6 +20,7 @@ impl BdAddr {
 
     /// The address as the kernel's `bdaddr_t` stores it: reversed.
     /// Spec: transport.md#sockets
+    #[cfg(target_os = "linux")]
     pub(crate) fn kernel_order(self) -> [u8; 6] {
         let mut bytes = self.0;
         bytes.reverse();
@@ -99,6 +101,7 @@ impl Uuid {
 
     /// A UUID as SDP encodes it: 2, 4 or 16 big-endian bytes.
     /// Spec: transport.md#sdp-data-elements
+    #[cfg(target_os = "linux")]
     pub(crate) fn from_sdp(bytes: &[u8]) -> Result<Self> {
         match *bytes {
             [a, b] => Ok(Uuid::from_u32(u32::from(u16::from_be_bytes([a, b])))),

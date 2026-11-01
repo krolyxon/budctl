@@ -8,9 +8,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-libc = "0.2.191"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+
+# BlueZ and the kernel's Bluetooth sockets. Android has neither: its app opens the link in Kotlin
+# (docs/android.md).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.191"
 zbus = { version = "5.19.0", default-features = false, features = ["blocking-api", "async-io"] }
 
 [lints]

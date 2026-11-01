@@ -1,10 +1,12 @@
 //! budctl-core: control wireless earbuds over Bluetooth, with device support as plugins.
 //!
-//! A front end (CLI, GUI) calls [`scan`], picks a device with [`select`], opens a session with
-//! [`connect`] and then reads or changes settings through [`devices::Session`].
+//! On Linux, a front end (CLI, GUI) calls [`scan`], picks a device with [`select`], opens a session
+//! with [`connect`] and then reads or changes settings through [`devices::Session`]. On Android,
+//! the app's Kotlin side lists the paired devices and opens the link (docs/android.md).
 //!
 //! No telemetry: the only sockets are Bluetooth sockets and the local system D-Bus (BlueZ).
 
+#[cfg(target_os = "linux")]
 pub mod bluez;
 pub mod bt;
 pub mod config;
@@ -17,11 +19,27 @@ pub mod transport;
 
 pub use error::{Error, Kind, Result};
 
-use bluez::PairedDevice;
 use bt::BdAddr;
-use devices::{Device, Session};
+use devices::Device;
+#[cfg(target_os = "linux")]
+use devices::Session;
+#[cfg(target_os = "linux")]
 use transport::rfcomm::Rfcomm;
+#[cfg(target_os = "linux")]
 use transport::{Hexdump, Transport, sdp};
+
+/// A paired device, as the system describes it: BlueZ on Linux, the app's Kotlin side on Android.
+#[derive(Debug, Clone)]
+pub struct PairedDevice {
+    pub address: BdAddr,
+    /// The name the device advertises. Device modules recognize models by this.
+    pub name: String,
+    /// The name the user gave it (the system falls back to `name`). Shown to people.
+    pub alias: String,
+    pub connected: bool,
+    /// The device's service UUIDs, lowercase and hyphenated.
+    pub uuids: Vec<String>,
+}
 
 /// A paired device and the model budctl recognized it as, if any.
 pub struct Found {
@@ -30,6 +48,7 @@ pub struct Found {
 }
 
 /// Every paired device BlueZ knows, each with its model when budctl supports it.
+#[cfg(target_os = "linux")]
 pub fn scan() -> Result<Vec<Found>> {
     Ok(bluez::paired_devices()?
         .into_iter()
@@ -94,6 +113,7 @@ pub fn select(found: Vec<Found>, address: Option<BdAddr>) -> Result<(PairedDevic
 
 /// Open a control session: find the control service with SDP, connect RFCOMM, run the model's
 /// init sequence.
+#[cfg(target_os = "linux")]
 pub fn connect(device: &PairedDevice, model: &'static dyn Device) -> Result<Box<dyn Session>> {
     if !device.connected {
         return Err(Error::NotConnected(format!(

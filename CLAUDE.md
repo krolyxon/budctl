@@ -7,7 +7,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 ## Goals
 
 - Control earbud features from Linux: ANC / transparency / off, EQ presets, game mode, touch controls, battery readout, and anything else the buds offer.
-- Two front ends, one core: the `budctl` CLI and the `budctl-gui` desktop app, both thin layers over the same library (`budctl-core`). Scripts and the owner's Quickshell (Aurora) can use `budctl --json`.
+- Front ends over one core: the `budctl` CLI and the `budctl-gui` desktop app, and next an Android app (plan: `docs/android.md`), all thin layers over the same library (`budctl-core`). Scripts and the owner's Quickshell (Aurora) can use `budctl --json`.
 - One small, readable codebase that the owner fully understands.
 - Device support is pluggable. Adding a new pair of buds means adding one module under `crates/budctl-core/src/devices/` and registering it in `devices/mod.rs`, without touching transport, CLI or GUI code.
 - Coexist with the phone app. Settings live on the buds, so budctl never stores device state locally beyond user config (`~/.config/budctl/config.json`, `budctl_core::config`: default device and GUI preferences, created with defaults when missing; a broken file is reported and the defaults are used).
@@ -33,17 +33,17 @@ The first supported device is the **realme Buds T310**. More devices are added a
 ## Stack
 
 - Rust (edition 2024) in a cargo workspace:
-  - `crates/budctl-core`: library with transport, BlueZ and device plugins.
+  - `crates/budctl-core`: library with transport, BlueZ and device plugins. It builds for Android too (`aarch64-linux-android`): BlueZ, the sockets and SDP are Linux-only (`cfg(target_os = "linux")`).
   - `crates/budctl-cli`: package and binary `budctl`.
   - `crates/budctl-gui`: package and binary `budctl-gui`, built with iced 0.14 for Wayland only, with the CPU renderer (tiny-skia).
-- Bluetooth goes through BlueZ:
+- On Linux, Bluetooth goes through BlueZ:
   - Raw `AF_BLUETOOTH` sockets via `libc`: RFCOMM for the control link, L2CAP to read the buds' SDP record.
   - `zbus` (blocking API) only to list paired devices.
   - Supporting BLE GATT would need a new transport kind in core.
 - CLI: `clap` (derive). It is parsed with `try_parse`, so usage errors exit 1, not clap's default 2. `serde_json` provides `--json`.
-- Tests: `cargo test --workspace`. Lints: `cargo clippy --workspace --all-targets -- -D warnings`.
+- Tests: `cargo test --workspace`. Lints: `cargo clippy --workspace --all-targets -- -D warnings`, and for Android `cargo clippy -p budctl-core --target aarch64-linux-android -- -D warnings`.
 - Keep dependencies minimal. Every new dependency needs a reason in the commit message. The current direct dependencies:
-  - core: `libc`, `zbus`, `serde`, `serde_json` (config file)
+  - core: `serde`, `serde_json` (config file); on Linux only, `libc` and `zbus`
   - cli: `clap`, `serde_json`
   - gui: `iced`, `serde`, `serde_json`; `iced_test` for tests
 
@@ -51,7 +51,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
 
 Each module in `crates/budctl-core/src/devices/` defines one `Device` implementation and is listed in `devices::REGISTRY`. A device declares:
 
-- `name()`, plus `matches()`: how to recognize it from BlueZ data (Bluetooth name and/or service UUID).
+- `name()`, plus `matches()`: how to recognize it from what the system reports about a paired device (Bluetooth name and/or service UUID).
 - `rfcomm_uuids()`: the transport. SDP turns the UUID into an RFCOMM channel.
 - `open()`: runs any init sequence the buds need before they accept commands, and returns a `Session`.
 - The features the model supports. The CLI and GUI only show features the connected device declares.
@@ -110,7 +110,8 @@ Exit codes:
    10. ~~fit test~~ (dropped: the T310 acks it but runs no test)
    11. custom EQ
 4. **GUI** (`budctl-gui`, see [GUI](#gui)): first the look, with demo data; then the keys; then the live connection; then the pages, one at a time.
-5. **More devices**: as acquired.
+5. **Android app** (`docs/android.md#steps`): a Kotlin app with budctl-core inside, to replace the other control app on the owner's phone. First the core builds for Android and the session worker moves into core; then the JNI crate, the Bluetooth link and a plain screen (phone checkpoints A1, A2); then the pages, one at a time.
+6. **More devices**: as acquired.
 
 ## GUI
 

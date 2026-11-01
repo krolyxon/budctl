@@ -1,14 +1,20 @@
 //! Byte transports. Device protocols only see the [`Transport`] trait, so they can be tested
 //! against a scripted mock instead of real buds.
 
+#[cfg(target_os = "linux")]
 use std::io;
 use std::time::Instant;
 
 use crate::debug;
-use crate::error::{Error, Result};
+#[cfg(target_os = "linux")]
+use crate::error::Error;
+use crate::error::Result;
 
+#[cfg(target_os = "linux")]
 pub mod rfcomm;
+#[cfg(target_os = "linux")]
 pub mod sdp;
+#[cfg(target_os = "linux")]
 mod socket;
 
 #[cfg(test)]
@@ -61,6 +67,7 @@ impl Transport for Hexdump {
 /// What an OS error on a Bluetooth socket means for budctl.
 /// `may_be_busy` is set only for the RFCOMM connect, where a refusal means another client
 /// holds the channel. Spec: transport.md#errno
+#[cfg(target_os = "linux")]
 pub(crate) fn classify(error: io::Error, context: &'static str, may_be_busy: bool) -> Error {
     let detail = || format!("{context}: {error}");
     match error.raw_os_error() {
@@ -80,7 +87,7 @@ pub(crate) fn classify(error: io::Error, context: &'static str, may_be_busy: boo
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
     use crate::error::Kind;

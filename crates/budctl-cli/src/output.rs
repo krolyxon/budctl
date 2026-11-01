@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 
-use budctl_core::bluez::PairedDevice;
+use budctl_core::PairedDevice;
 use budctl_core::devices::Device;
 use budctl_core::status::{
     Charge, DualDevice, EqPreset, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls,
