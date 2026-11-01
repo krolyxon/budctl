@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -49,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -104,6 +107,8 @@ fun Screen(app: App, askPermission: () -> Unit) {
                         when (pages[index]) {
                             Page.Overview -> Overview(app, askPermission) { open(pages.indexOf(it)) }
                             Page.Equalizer -> Equalizer(app)
+                            Page.Gestures -> Gestures(app)
+                            Page.Earbuds -> Earbuds(app)
                             Page.App -> AppPage(app)
                         }
                         Spacer(Modifier.size(12.dp))
@@ -128,6 +133,15 @@ fun Screen(app: App, askPermission: () -> Unit) {
             )
         }
         app.prompt?.let { NameDialog(app, it) }
+        if (app.confirmFind) {
+            // The sound is loud enough to hurt in the ears.
+            Confirm(
+                "Ring your buds?",
+                "Take them out of your ears first: the sound is loud. They ring until you press Stop.",
+                "Ring",
+                app::answerFind,
+            )
+        }
     }
 }
 
@@ -175,8 +189,17 @@ private fun PageWords(pages: List<Page>, open: Int, onOpen: (Int) -> Unit) {
                 Motion.eased(Motion.PAGE, look.motion),
                 label = "word",
             )
+            // The open word scrolls into view once it has grown.
+            val requester = remember { BringIntoViewRequester() }
+            LaunchedEffect(isOpen) {
+                if (isOpen) {
+                    if (look.motion) delay(Motion.PAGE.toLong())
+                    requester.bringIntoView()
+                }
+            }
             Row(
                 Modifier
+                    .bringIntoViewRequester(requester)
                     .clip(RoundedCornerShape(20.dp))
                     .clickable(remember { MutableInteractionSource() }, indication = null) { onOpen(index) }
                     .padding(horizontal = 8.dp, vertical = 4.dp),

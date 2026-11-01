@@ -70,6 +70,10 @@ data class Buds(
         return shownName(preset)
     }
 
+    /** What a gesture of a bud (`left`, `right`) does now. */
+    fun action(side: String, gesture: String) =
+        touch?.gestures?.find { it.side == side && it.gesture == gesture && it.group == null }?.action
+
     /** The preset with this id. */
     fun preset(id: Int) = presets?.presets?.find { it.id == id }
 
@@ -197,6 +201,10 @@ internal fun parseNoise(json: JSONObject) = NoiseControl(json.getString("mode"),
 /** A switch, as a reading and the `switch` event give it. */
 internal fun parseSwitch(json: JSONObject) = Switch(json.getString("key"), json.getString("label"), json.getBoolean("on"))
 
+/** A gesture and its action, as a reading and the `touch` event give it. */
+internal fun parseGesture(json: JSONObject) =
+    Gesture(json.getString("side"), json.getString("gesture"), json.getString("action"), if (json.isNull("group")) null else json.getInt("group"))
+
 /** An EQ preset, as a reading and the `custom-eq` event give it. */
 internal fun parsePreset(json: JSONObject) = EqPreset(
     json.getString("name"),
@@ -210,9 +218,7 @@ internal fun parsePreset(json: JSONObject) = EqPreset(
 internal fun parsePresets(json: JSONObject) = EqPresets(json.text("current"), json.optJSONArray("presets").objects().map(::parsePreset))
 
 private fun touch(json: JSONObject) = TouchControls(
-    gestures = json.optJSONArray("gestures").objects().map {
-        Gesture(it.getString("side"), it.getString("gesture"), it.getString("action"), if (it.isNull("group")) null else it.getInt("group"))
-    },
+    gestures = json.optJSONArray("gestures").objects().map(::parseGesture),
     holdCycle = json.optJSONArray("hold_cycle")?.strings(),
     choices = json.optJSONArray("choices").objects().map { GestureChoice(it.getString("gesture"), it.optJSONArray("actions").strings()) },
     cycleModes = json.optJSONArray("cycle_modes").strings(),

@@ -31,6 +31,10 @@ fun Overview(app: App, askPermission: () -> Unit, open: (Page) -> Unit) {
 private fun More(app: App, open: (Page) -> Unit) {
     Card {
         SettingRow(Icon.Equalizer, "Equalizer", app.buds.eqName(), onClick = { open(Page.Equalizer) }) { Chevron() }
+        SettingRow(Icon.Gestures, "Gestures", "Taps and holds on each bud", onClick = { open(Page.Gestures) }) { Chevron() }
+        SettingRow(Icon.Earbud, "Earbud settings", "Dual connection, find my earbuds, firmware", onClick = { open(Page.Earbuds) }) {
+            Chevron()
+        }
     }
 }
 

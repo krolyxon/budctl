@@ -12,6 +12,8 @@ import org.json.JSONObject
 enum class Page(val word: String, val caption: String) {
     Overview("overview", "overview · battery, noise control, sound"),
     Equalizer("eq", "equalizer · presets, and the bands of yours"),
+    Gestures("gestures", "gestures · taps and holds on each bud"),
+    Earbuds("buds", "earbud settings · connection, find, firmware"),
     App("app", "app · colors, motion, debug log"),
 }
 
@@ -29,7 +31,19 @@ sealed interface Item {
     data class Preset(val id: Int) : Item
 
     data object NewPreset : Item
+
+    /** A gesture of one bud given an action. */
+    data class Gesture(val side: String, val gesture: String) : Item
+
+    /** A mode put in the hold cycle or taken out. */
+    data class Cycle(val mode: String) : Item
+
+    /** The buds told to ring, or to stop. */
+    data object Find : Item
 }
+
+/** An action picked for a gesture on the screen, not on the buds yet. */
+data class TouchDraft(val side: String, val gesture: String, val action: String)
 
 /** A custom preset's bands as moved on the screen, not saved on the buds yet. */
 data class Draft(val preset: Int, val bands: List<EqBand>)
@@ -96,6 +110,17 @@ class App(
         private set
 
     var prompt by mutableStateOf<NamePrompt?>(null)
+        private set
+
+    var touchDraft by mutableStateOf<TouchDraft?>(null)
+        private set
+
+    /** The buds were told to ring and not yet to stop. */
+    var ringing by mutableStateOf(false)
+        private set
+
+    /** "Ring your buds?" is open. */
+    var confirmFind by mutableStateOf(false)
         private set
 
     /** The commands sent and not answered yet, oldest first: each gets one event, in order. */
@@ -235,6 +260,42 @@ class App(
         }
     }
 
+    /** Gives a gesture an action, written at once. A pick made while a write is on its way goes after it. */
+    fun pickAction(side: String, gesture: String, action: String) {
+        touchDraft = TouchDraft(side, gesture, action)
+        saveTouch()
+    }
+
+    private fun saveTouch() {
+        val draft = touchDraft ?: return
+        when {
+            buds.action(draft.side, draft.gesture) == draft.action -> touchDraft = null
+            Item.Gesture(draft.side, draft.gesture) !in inFlight -> command(
+                Item.Gesture(draft.side, draft.gesture),
+                JSONObject().put("command", "touch").put("side", draft.side).put("gesture", draft.gesture).put("action", draft.action),
+            )
+        }
+    }
+
+    /** Rings the buds, after "Ring your buds?" (the sound is loud), or stops them. */
+    fun find() {
+        if (ringing) command(Item.Find, JSONObject().put("command", "find").put("ring", false)) else confirmFind = true
+    }
+
+    fun answerFind(ring: Boolean) {
+        confirmFind = false
+        if (ring) command(Item.Find, JSONObject().put("command", "find").put("ring", true))
+    }
+
+    /** Puts a mode in the hold cycle or takes it out. The buds need two modes to step through. */
+    fun cycle(mode: String, on: Boolean) {
+        val now = buds.touch?.holdCycle ?: return
+        val modes = now.filter { it != mode } + if (on) listOf(mode) else emptyList()
+        if (modes.size >= 2 && inFlight.none { it is Item.Cycle }) {
+            command(Item.Cycle(mode), JSONObject().put("command", "hold-cycle").put("modes", JSONArray(modes)))
+        }
+    }
+
     private fun customEq(preset: EqPreset, bands: List<EqBand>) = JSONObject()
         .put("command", "custom-eq")
         .put("preset", Buds.key(preset))
@@ -296,6 +357,22 @@ class App(
                         // A new preset opens its bands: it is the one in use.
                         if (item == Item.NewPreset) editing = buds.inUse()?.id
                     }
+                    "touch" -> {
+                        val gestures = event.getJSONArray("gestures").let { a -> List(a.length()) { parseGesture(a.getJSONObject(it)) } }
+                        buds = buds.copy(touch = buds.touch?.copy(gestures = gestures))
+                        connection = Connection.Live
+                        // An action picked while this write was on its way goes out now.
+                        if (item is Item.Gesture) saveTouch()
+                    }
+                    "ringing" -> {
+                        ringing = event.getBoolean("ring")
+                        connection = Connection.Live
+                    }
+                    "hold-cycle" -> {
+                        val modes = event.getJSONArray("modes").let { a -> List(a.length()) { a.getString(it) } }
+                        buds = buds.copy(touch = buds.touch?.copy(holdCycle = modes))
+                        connection = Connection.Live
+                    }
                     "bass" -> {
                         val level = event.getInt("level")
                         buds = buds.copy(bass = level)
@@ -307,7 +384,9 @@ class App(
                         connection = Connection.Failed(kind, event.getString("message"))
                         if (kind == "not-found") buds = buds.copy(connected = false)
                         if (item == Item.Bass) bassDraft = null
+                        // The buds keep what they had: show that, not what was picked.
                         if (item is Item.Preset && draft?.preset == item.id) draft = null
+                        if (item is Item.Gesture && touchDraft?.let { Item.Gesture(it.side, it.gesture) } == item) touchDraft = null
                     }
                 }
             }
@@ -333,6 +412,23 @@ class App(
                 bassDraft = null
             }
             is Item.Preset, Item.NewPreset -> pretendEq(json)
+            is Item.Gesture -> {
+                val action = json.getString("action")
+                val touch = buds.touch ?: return
+                buds = buds.copy(
+                    touch = touch.copy(
+                        gestures = touch.gestures.map {
+                            if (it.side == item.side && it.gesture == item.gesture && it.group == null) it.copy(action = action) else it
+                        },
+                    ),
+                )
+                touchDraft = null
+            }
+            is Item.Cycle -> {
+                val modes = json.getJSONArray("modes").let { a -> List(a.length()) { a.getString(it) } }
+                buds = buds.copy(touch = buds.touch?.copy(holdCycle = modes))
+            }
+            Item.Find -> ringing = json.getBoolean("ring")
         }
     }
 
