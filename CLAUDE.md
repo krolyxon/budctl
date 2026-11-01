@@ -148,12 +148,13 @@ Exit codes:
 ## Releases
 
 - One version for the whole workspace (`Cargo.toml`), with a section per release in `CHANGELOG.md`.
-- To release: bump the version, add its `CHANGELOG.md` section, commit, then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag matches `Cargo.toml`, runs the tests, builds x86_64 and aarch64 on Ubuntu 22.04 (glibc builds; Wayland is loaded at runtime), and publishes the tarballs, their `.sha256` files and `install.sh`, with that changelog section as the notes.
+- To release: bump the version, add its `CHANGELOG.md` section, commit, then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag matches `Cargo.toml`, runs the tests, builds x86_64 and aarch64 on Ubuntu 22.04 (glibc builds; Wayland is loaded at runtime) and the signed Android APK, and publishes the tarballs, `budctl.apk`, their `.sha256` files and `install.sh`, with that changelog section as the notes.
+- The APK's signing key is the owner's: `~/.local/share/budctl-release/` (never in the repo) and the repository secrets `BUDCTL_KEYSTORE_BASE64` and `BUDCTL_KEYSTORE_PASSWORD` (`docs/android.md#steps`, step 6). Every release must be signed with that same key, or phones cannot update.
 - The tarballs carry the binaries, `budctl.desktop`, the icon (`docs/icon.svg` as `budctl.svg`), `install.sh`, the README and the licenses.
 - `install.sh` installs into `~/.local` by default: from a release download (`curl … | sh`), from the unpacked tarball it sits in, or from a checkout with `--source`. It puts the icon in `share/icons/hicolor/scalable/apps/` (a release from before the icon has none, and is installed without). `--uninstall` removes the binaries, the launcher entry and the icon, never the user's config or log.
 - `contrib/arch/PKGBUILD` (`budctl-bin`, not on the AUR) packages the release tarballs, the icon too once a release carries it. After a release is published, bump its `pkgver` and take the sums from the release's `.sha256` files.
 - The logo: `docs/icon.svg` (the LED battery ring, its last lit dot the red live dot, around a dot-matrix "b") is the launcher icon on both platforms; the Android app has the same dots as vector drawables (adaptive, plus a monochrome layer for themed icons). `docs/logo.svg` is the README's banner: the same emblem and "BUDCTL" in dot-matrix capitals.
-- `.github/workflows/ci.yml` runs fmt, clippy and the tests on every push to master.
+- `.github/workflows/ci.yml` runs fmt, clippy and the tests on every push to master, and builds and tests the Android app.
 
 ## License
 

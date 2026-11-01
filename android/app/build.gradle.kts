@@ -26,6 +26,20 @@ android {
         versionCode = version.split('.').fold(0) { code, part -> code * 100 + part.toInt() }
     }
 
+    // The release key stays with the owner: its file and password come from the environment (a CI
+    // secret, or ~/.local/share/budctl-release on the owner's machine), never from the repo.
+    val keystore = System.getenv("BUDCTL_KEYSTORE")
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("BUDCTL_KEYSTORE_PASSWORD")
+                keyAlias = "budctl"
+                keyPassword = System.getenv("BUDCTL_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         // Only where the Rust library is built for: the phone, and the emulator in debug builds.
         debug {
@@ -35,6 +49,8 @@ android {
             ndk { abiFilters += listOf("arm64-v8a") }
             // The Rust library calls Platform's methods by name, so nothing may rename them.
             isMinifyEnabled = false
+            // Without the key, the release build comes out unsigned.
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 

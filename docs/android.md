@@ -148,10 +148,17 @@ Written from Android's API reference. No other app's code is read for it (rule 2
    - Built: the look and every page of the desktop app (Overview, Equalizer, Gestures, Earbud
      settings), plus the APP page.
    *Done when* **A3** passes for every page.
-6. **Release.** One version for everything: Gradle reads it from `Cargo.toml`. CI builds and
-   tests the app on every push, and a tag adds a signed APK to the GitHub release. The signing key
-   stays with the owner, as a CI secret. No Play Store. New versions come from the GitHub releases
-   (an app such as Obtainium can watch them); budctl itself never checks.
+6. **Release.** One version for everything: Gradle reads it from `Cargo.toml` (versionCode
+   `major * 10000 + minor * 100 + patch`). CI builds and tests the app on every push, and a tag adds
+   `budctl.apk` and its `.sha256` to the GitHub release. No Play Store. New versions come from the
+   GitHub releases (an app such as Obtainium can watch them); budctl itself never checks.
+   - The signing key stays with the owner: `~/.local/share/budctl-release/` on the owner's machine
+     (the keystore, alias `budctl`, and its password), and the repository's secrets
+     `BUDCTL_KEYSTORE_BASE64` and `BUDCTL_KEYSTORE_PASSWORD`. Gradle signs release builds when
+     `BUDCTL_KEYSTORE` and `BUDCTL_KEYSTORE_PASSWORD` are set, and leaves them unsigned otherwise.
+     Losing the key means a new one, and every phone then has to uninstall before it can update.
+   - Certificate SHA-256:
+     `45:6F:9B:93:AA:40:1D:57:AA:6C:75:0D:FF:13:FA:82:5A:7B:28:B6:3D:D0:40:99:80:6F:A9:7C:14:75:23:12`.
    *Done when* a tagged release carries the APK and the phone runs it.
 7. **Retire the other control app on the phone** (the owner), once **A4** passes.
 

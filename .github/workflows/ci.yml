@@ -23,3 +23,22 @@ jobs:
       - run: cargo clippy -p budctl-core --target aarch64-linux-android --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: sh -n install.sh
+
+  # The Android app: its Rust library (debug, for the phone and the emulator), the app and its JVM
+  # tests. The manifest check (no INTERNET) runs with the build.
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - run: cargo install cargo-ndk --locked
+      - name: Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;30.0.16248370" "platforms;android-37.0" "build-tools;36.0.0" > /dev/null
+      - run: ./gradlew --no-daemon assembleDebug testDebugUnitTest
+        working-directory: android
