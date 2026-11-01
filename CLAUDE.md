@@ -37,6 +37,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
   - `crates/budctl-cli`: package and binary `budctl`.
   - `crates/budctl-gui`: package and binary `budctl-gui`, built with iced 0.14 for Wayland only, with the CPU renderer (tiny-skia).
   - `crates/budctl-android`: `libbudctl_android.so` for the Android app, built with `cargo ndk`: three JNI exports, JSON commands and events, and a `Transport` over the app's Bluetooth link (`docs/android.md#boundary`).
+- The Android app, `android/` (Gradle, Kotlin, Compose; application id `io.github.krolyxon.budctl`, minSdk 31): `cd android && ./gradlew assembleDebug testDebugUnitTest`, with `JAVA_HOME=/opt/android-studio/jbr` on the owner's machine. Gradle runs cargo-ndk for the Rust library (arm64-v8a, plus x86_64 for the emulator in debug builds) and fails the build if the merged manifest asks for `INTERNET`. The app's Bluetooth code is `Bluetooth.kt` and `Link.kt`.
 - On Linux, Bluetooth goes through BlueZ:
   - Raw `AF_BLUETOOTH` sockets via `libc`: RFCOMM for the control link, L2CAP to read the buds' SDP record.
   - `zbus` (blocking API) only to list paired devices.
@@ -48,6 +49,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
   - cli: `clap`, `serde_json`
   - gui: `iced`, `serde`, `serde_json`; `iced_test` for tests
   - android: `jni`, `serde`, `serde_json`
+  - the Android app: the Compose BOM (`foundation`, `ui`) and `activity-compose`; `junit` for tests
 
 ## Device plugin contract
 

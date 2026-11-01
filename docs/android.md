@@ -126,8 +126,10 @@ Written from Android's API reference. No other app's code is read for it (rule 2
    *Done when* `cargo ndk -t arm64-v8a build -p budctl-android` builds and the crate's tests
    (JSON round trips, a scripted link) pass on Linux.
 4. **The Android project** (`android/`): Gradle, with `cargo ndk` run from Gradle, `Bluetooth.kt`,
-   `Core.kt`, and a plain screen with the status as text, the noise-control choice and the debug
-   log. JVM tests cover the link's reader thread and timeouts.
+   `Link.kt`, `Core.kt`, and a plain screen with the status as text, the noise-control choice and
+   the debug log. JVM tests cover the link's reader thread and timeouts. Build and install with
+   `cd android && ./gradlew assembleDebug` and
+   `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
    *Done when* **A1** and **A2** pass on the phone.
 5. **The pages**, built the way the desktop app was: first the look with demo buds, then live
    buds, then one page at a time (Overview, Equalizer, Gestures, Earbuds, Settings).
