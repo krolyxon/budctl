@@ -11,12 +11,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,9 +34,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
@@ -114,12 +119,20 @@ private val DOT = 5.dp
 private val DOT_BIG = 11.dp
 
 /**
- * A dotted slider over [low]..[high], one dot per step, left to right: the dots from 0 to the
- * value are lit, and the value's own dot is larger. A touch or a drag calls [change]; lifting the
- * finger calls [release], which is when a front end writes.
+ * A dotted slider over [low]..[high], one dot per step, left to right or, [vertical], bottom to
+ * top: the dots from 0 to the value are lit, and the value's own dot is larger. A touch or a drag
+ * calls [change]; lifting the finger calls [release], which is when a front end writes.
  */
 @Composable
-fun DotSlider(low: Int, high: Int, value: Int, change: (Int) -> Unit, release: () -> Unit, modifier: Modifier = Modifier) {
+fun DotSlider(
+    low: Int,
+    high: Int,
+    value: Int,
+    change: (Int) -> Unit,
+    release: () -> Unit,
+    modifier: Modifier = Modifier,
+    vertical: Boolean = false,
+) {
     val look = LocalLook.current
     val p = look.p
     val onChange by rememberUpdatedState(change)
@@ -137,30 +150,31 @@ fun DotSlider(low: Int, high: Int, value: Int, change: (Int) -> Unit, release: (
         }
     }
     val steps = max(1, high - low)
+    val sized = if (vertical) modifier.width(DOT_BIG + 22.dp).height(190.dp) else modifier.fillMaxWidth().height(DOT_BIG + 22.dp)
+
+    /** 0 to 1 along the slider for a point on it. */
+    fun Density.along(at: Offset, size: IntSize): Float {
+        val pad = DOT_BIG.toPx()
+        val along = if (vertical) (size.height - pad - at.y) / max(1f, size.height - 2 * pad) else (at.x - pad) / max(1f, size.width - 2 * pad)
+        return along.coerceIn(0f, 1f)
+    }
     Canvas(
-        modifier
-            .fillMaxWidth()
-            .height(DOT_BIG + 22.dp)
-            .pointerInput(low, high) {
-                fun at(x: Float): Int {
-                    val pad = DOT_BIG.toPx()
-                    val along = ((x - pad) / max(1f, size.width - 2 * pad)).coerceIn(0f, 1f)
-                    return (low + (along * steps).roundToInt()).coerceIn(low, high)
-                }
-                detectTapGestures { offset ->
-                    onChange(at(offset.x))
+        sized
+            .pointerInput(low, high, vertical) {
+                detectTapGestures { at ->
+                    onChange(low + (along(at, size) * steps).roundToInt())
                     onRelease()
                 }
             }
-            .pointerInput(low, high) {
-                fun at(x: Float): Int {
-                    val pad = DOT_BIG.toPx()
-                    val along = ((x - pad) / max(1f, size.width - 2 * pad)).coerceIn(0f, 1f)
-                    return (low + (along * steps).roundToInt()).coerceIn(low, high)
-                }
-                detectHorizontalDragGestures(onDragEnd = { onRelease() }, onDragCancel = { onRelease() }) { change, _ ->
+            .pointerInput(low, high, vertical) {
+                val drag = { change: PointerInputChange ->
                     change.consume()
-                    onChange(at(change.position.x))
+                    onChange(low + (along(change.position, size) * steps).roundToInt())
+                }
+                if (vertical) {
+                    detectVerticalDragGestures(onDragEnd = { onRelease() }, onDragCancel = { onRelease() }) { change, _ -> drag(change) }
+                } else {
+                    detectHorizontalDragGestures(onDragEnd = { onRelease() }, onDragCancel = { onRelease() }) { change, _ -> drag(change) }
                 }
             },
     ) {
@@ -170,14 +184,18 @@ fun DotSlider(low: Int, high: Int, value: Int, change: (Int) -> Unit, release: (
         val to = maxOf(base, value)
         val g = grow.value
         for (v in low..high) {
-            val x = pad + (v - low).toFloat() / steps * (size.width - 2 * pad)
-            val lit = v in from..to
-            val diameter = when {
-                v == value -> lerp(DOT.toPx(), DOT_BIG.toPx(), g)
-                v == left -> lerp(DOT_BIG.toPx(), DOT.toPx(), g)
+            val along = (v - low).toFloat() / steps
+            val at = if (vertical) {
+                Offset(size.width / 2, size.height - pad - along * (size.height - 2 * pad))
+            } else {
+                Offset(pad + along * (size.width - 2 * pad), size.height / 2)
+            }
+            val diameter = when (v) {
+                value -> lerp(DOT.toPx(), DOT_BIG.toPx(), g)
+                left -> lerp(DOT_BIG.toPx(), DOT.toPx(), g)
                 else -> DOT.toPx()
             }
-            drawCircle(if (lit || v == value) p.fill else p.s3, diameter / 2, Offset(x, size.height / 2))
+            drawCircle(if (v in from..to) p.fill else p.s3, diameter / 2, at)
         }
     }
 }

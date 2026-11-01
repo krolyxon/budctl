@@ -193,6 +193,13 @@ fun Pill(words: String, filled: Boolean = false, onClick: () -> Unit) {
     }
 }
 
+/** A round button with just an icon, like the pencil on a preset's row. */
+@Composable
+fun IconButton(icon: Icon, onClick: () -> Unit) {
+    val p = LocalLook.current.p
+    Box(pressable(p.s2, onClick, CircleShape).size(40.dp), contentAlignment = Alignment.Center) { Glyph(icon, 18.dp, p.fg) }
+}
+
 /** A value shown in a dark pill, like a firmware version or "NOT SET". */
 @Composable
 fun ValueChip(words: String) {

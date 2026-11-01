@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -22,19 +23,28 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -63,12 +73,14 @@ fun Screen(app: App, askPermission: () -> Unit) {
                 .safeDrawingPadding(),
         ) {
             Header(app)
-            PageWords(pages, pager.currentPage) { page ->
+            val open = { page: Int ->
                 scope.launch {
                     if (look.motion) pager.animateScrollToPage(page, animationSpec = tween(Motion.PAGE, easing = Motion.EASE))
                     else pager.scrollToPage(page)
                 }
+                Unit
             }
+            PageWords(pages, pager.currentPage, open)
             HorizontalPager(pager, Modifier.weight(1f)) { index ->
                 Box(
                     Modifier
@@ -90,7 +102,8 @@ fun Screen(app: App, askPermission: () -> Unit) {
                         Caption(pages[index].caption)
                         app.problem?.let { Problem(it) { app.read() } }
                         when (pages[index]) {
-                            Page.Overview -> Overview(app, askPermission)
+                            Page.Overview -> Overview(app, askPermission) { open(pages.indexOf(it)) }
+                            Page.Equalizer -> Equalizer(app)
                             Page.App -> AppPage(app)
                         }
                         Spacer(Modifier.size(12.dp))
@@ -106,6 +119,15 @@ fun Screen(app: App, askPermission: () -> Unit) {
                 app::answerDual,
             )
         }
+        app.confirmDelete?.let { id ->
+            Confirm(
+                "Delete ${app.buds.preset(id)?.name ?: "this preset"}?",
+                "Its bands are lost. The buds keep their other presets.",
+                "Delete",
+                app::answerDelete,
+            )
+        }
+        app.prompt?.let { NameDialog(app, it) }
     }
 }
 
@@ -167,6 +189,50 @@ private fun PageWords(pages: List<Page>, open: Int, onOpen: (Int) -> Unit) {
             }
         }
     }
+}
+
+/** Asks for a preset's name: a new one's, or a new name for one. */
+@Composable
+private fun NameDialog(app: App, asked: NamePrompt) {
+    val look = LocalLook.current
+    val p = look.p
+    val heading = asked.renaming?.let { "Rename ${app.buds.preset(it)?.name ?: "the preset"}" } ?: "New preset"
+    val focus = remember { FocusRequester() }
+    Dialog(onDismissRequest = app::cancelName) {
+        CompositionLocalProvider(LocalLook provides look) {
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(p.s1)
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                Words(heading, 22.sp, weight = FontWeight.SemiBold)
+                BasicTextField(
+                    asked.text,
+                    app::typeName,
+                    Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focus)
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(p.s2)
+                        .border(1.dp, p.fill, RoundedCornerShape(percent = 50))
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    textStyle = TextStyle(fontFamily = look.fonts.ui, fontSize = 16.sp, color = p.fg),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { app.submitName() }),
+                    singleLine = true,
+                    cursorBrush = SolidColor(p.fill),
+                )
+                asked.problem?.let { Words(it, 13.sp, p.err) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+                    Pill("Cancel", onClick = app::cancelName)
+                    Pill(if (asked.renaming == null) "Create" else "Rename", filled = true, onClick = app::submitName)
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { focus.requestFocus() }
 }
 
 /** A question over the dimmed page: Cancel, or [action]. */

@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.dp
 
 /** The Overview page (crates/budctl-gui/src/overview.rs): battery, noise control, the switches. */
 @Composable
-fun Overview(app: App, askPermission: () -> Unit) {
+fun Overview(app: App, askPermission: () -> Unit, open: (Page) -> Unit) {
     if (!app.permitted) {
         Note("budctl needs the Nearby devices permission to reach the buds.")
         Row(Modifier.padding(horizontal = 18.dp)) { Pill("Allow", filled = true, onClick = askPermission) }
@@ -23,6 +23,15 @@ fun Overview(app: App, askPermission: () -> Unit) {
     Battery(buds)
     buds.noise?.let { NoiseChoice(app, it) }
     if (buds.switches.isNotEmpty()) Switches(app)
+    More(app, open)
+}
+
+/** The rows that open the other pages. */
+@Composable
+private fun More(app: App, open: (Page) -> Unit) {
+    Card {
+        SettingRow(Icon.Equalizer, "Equalizer", app.buds.eqName(), onClick = { open(Page.Equalizer) }) { Chevron() }
+    }
 }
 
 @Composable

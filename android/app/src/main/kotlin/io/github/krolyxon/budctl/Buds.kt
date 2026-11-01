@@ -70,6 +70,26 @@ data class Buds(
         return shownName(preset)
     }
 
+    /** The preset with this id. */
+    fun preset(id: Int) = presets?.presets?.find { it.id == id }
+
+    /** The custom preset in use, if one is. */
+    fun inUse() = presets?.presets?.find { it.custom && key(it) == eq }
+
+    /** [now] is the preset in use. */
+    fun withEq(now: String) = copy(eq = now, presets = presets?.copy(current = now))
+
+    /** A custom preset as the buds report it after a write: saved, and in use. A new one joins the list. */
+    fun withCustom(saved: EqPreset): Buds {
+        val list = presets?.presets.orEmpty()
+        val known = list.any { it.custom && it.id == saved.id }
+        val updated = if (known) list.map { if (it.custom && it.id == saved.id) saved else it } else list + saved
+        return copy(presets = EqPresets(key(saved), updated), eq = key(saved))
+    }
+
+    /** The whole preset list, as the buds report it after a create or a delete. */
+    fun withPresets(all: EqPresets) = copy(presets = all, eq = all.current)
+
     /** The buds as a reading says, keeping what the app knows and the buds do not report. */
     fun read(reading: JSONObject): Buds {
         val status = reading.getJSONObject("status")
@@ -84,7 +104,7 @@ data class Buds(
             switches = status.optJSONArray("switches").objects().map(::parseSwitch),
             codec = status.text("codec"),
             firmware = status.text("firmware"),
-            presets = reading.optJSONObject("eq")?.let(::presets),
+            presets = reading.optJSONObject("eq")?.let(::parsePresets),
             touch = reading.optJSONObject("touch")?.let(::touch),
             bassRange = reading.optJSONArray("bass_range")?.let { it.getInt(0)..it.getInt(1) },
             dual = reading.optJSONArray("dual")?.objects()?.map(::dual),
@@ -177,7 +197,8 @@ internal fun parseNoise(json: JSONObject) = NoiseControl(json.getString("mode"),
 /** A switch, as a reading and the `switch` event give it. */
 internal fun parseSwitch(json: JSONObject) = Switch(json.getString("key"), json.getString("label"), json.getBoolean("on"))
 
-private fun preset(json: JSONObject) = EqPreset(
+/** An EQ preset, as a reading and the `custom-eq` event give it. */
+internal fun parsePreset(json: JSONObject) = EqPreset(
     json.getString("name"),
     json.getInt("id"),
     json.getBoolean("custom"),
@@ -185,7 +206,8 @@ private fun preset(json: JSONObject) = EqPreset(
     json.optJSONArray("range")?.let { it.getInt(0)..it.getInt(1) },
 )
 
-private fun presets(json: JSONObject) = EqPresets(json.text("current"), json.optJSONArray("presets").objects().map(::preset))
+/** The preset list, as a reading and the `presets` event give it. */
+internal fun parsePresets(json: JSONObject) = EqPresets(json.text("current"), json.optJSONArray("presets").objects().map(::parsePreset))
 
 private fun touch(json: JSONObject) = TouchControls(
     gestures = json.optJSONArray("gestures").objects().map {

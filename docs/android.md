@@ -145,7 +145,7 @@ Written from Android's API reference. No other app's code is read for it (rule 2
      button.
    - Claude checks the look on the emulator with the demo buds, from adb screenshots: launch with
      `--ez demo true`.
-   - Built so far: the look, the Overview and the APP page. Next: Equalizer, Gestures, Earbuds.
+   - Built so far: the look, the Overview, the Equalizer and the APP page. Next: Gestures, Earbuds.
    *Done when* **A3** passes for every page.
 6. **Release.** One version for everything: Gradle reads it from `Cargo.toml`. CI builds and
    tests the app on every push, and a tag adds a signed APK to the GitHub release. The signing key
