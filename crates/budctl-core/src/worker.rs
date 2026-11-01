@@ -10,7 +10,6 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::debug;
 use crate::devices::Session;
 use crate::error::{Error, Kind, Result};
 use crate::status::{
@@ -108,7 +107,8 @@ pub trait Report: Send {
     /// An answer to a command, or [`Event::Found`] or [`Event::Lost`].
     fn event(&self, event: Event);
 
-    /// A line for the front end's log: each command, sessions opening and closing, failures.
+    /// A line for the front end's log: each command, sessions opening and closing, failures. A
+    /// front end that prints debug output elsewhere shows these there too, as context.
     fn log(&self, line: &str);
 }
 
@@ -176,7 +176,6 @@ impl Worker {
         if self.last_command.elapsed() >= self.idle {
             self.session = None;
             let message = format!("session closed after {} s without a command", self.idle.as_secs());
-            debug::note(|| message.clone());
             self.report.log(&message);
         } else if let Err(error) = session.serve() {
             self.session = None;

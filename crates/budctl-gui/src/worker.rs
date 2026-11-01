@@ -36,7 +36,8 @@ pub fn run(&(device, idle): &(Option<BdAddr>, Duration)) -> impl Stream<Item = M
     })
 }
 
-/// The window's side of the worker: events go to the subscription, lines to the GUI's log.
+/// The window's side of the worker: events go to the subscription, lines to the GUI's log and,
+/// with `--debug`, between the frames on stderr.
 struct Window(channel::UnboundedSender<Event>);
 
 impl Report for Window {
@@ -46,6 +47,9 @@ impl Report for Window {
     }
 
     fn log(&self, line: &str) {
+        if budctl_core::debug::enabled() {
+            eprintln!("#        {line}");
+        }
         log::line(line);
     }
 }
