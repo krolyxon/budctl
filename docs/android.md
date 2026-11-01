@@ -109,7 +109,7 @@ Written from Android's API reference. No other app's code is read for it (rule 2
    for Gradle (`/opt/android-studio/jbr`). The NDK, from Studio's SDK Manager.
    `rustup target add aarch64-linux-android x86_64-linux-android` and `cargo install cargo-ndk`.
    *Done when* the NDK is in `~/Android/Sdk/ndk` and `adb devices` lists the emulator. The phone
-   joins before A1: wireless debugging, paired with `adb pair`.
+   joins before A1, over USB debugging (`android-udev` gives adb access to it without root).
 1. **The core builds for Android.** `bluez`, `transport::{rfcomm, sdp, socket}`, `scan` and
    `connect` go behind `cfg(target_os = "linux")`, and `libc` and `zbus` become Linux-only
    dependencies. `PairedDevice` moves to the crate root, since Android fills it too. CI checks the
