@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 (2026-11-01)
 
-- An Android app, in `android/`: the desktop app's pages and look on a phone, with the same Rust
-  library inside, colors from your wallpaper, and no internet permission. There is no release build
-  of it yet; the README says how to build it.
-- budctl has an icon: the LED battery ring around a dot-matrix "b". `install.sh` and the PKGBUILD
-  install it for the launcher entry, and the README has a banner in the same dots.
+budctl comes to Android, and gets an icon.
+
+- An Android app: the desktop app's pages and look on a phone (Android 12 or newer), with the same
+  Rust library inside, colors from your wallpaper, and no internet permission. Install `budctl.apk`
+  from this release. It is signed with budctl's own key; the certificate's SHA-256 fingerprint is
+  `45:6F:9B:93:AA:40:1D:57:AA:6C:75:0D:FF:13:FA:82:5A:7B:28:B6:3D:D0:40:99:80:6F:A9:7C:14:75:23:12`.
+- budctl has an icon: the LED battery ring around a dot-matrix "b". The release archives carry it,
+  and `install.sh` and the PKGBUILD install it for the launcher entry.
 - With `--debug`, `budctl-gui` also shows each command, connect and failure between the frames.
 
 ## 0.1.3 (2026-11-01)
