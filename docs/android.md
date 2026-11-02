@@ -7,6 +7,9 @@ app.
 This file is the plan. Each step says when it is done. The phone checkpoints go into the
 [verification log](protocol/realme_t310.md#verification-log), like the desktop app's.
 
+**Done** (2026-11-02): every step, and every checkpoint passed. Release 0.1.4 carries the app as
+`budctl.apk`, and the owner has removed the other control app from the phone.
+
 ## Why Kotlin as well as Rust
 
 - Android has no BlueZ, and apps cannot open the kernel Bluetooth sockets that
@@ -184,7 +187,8 @@ Run on the phone with debug on, and paste the in-app log.
   after the last command, and when the app leaves the screen.
 - **A3:** each page's writes, as G3–G8 were for the desktop app.
 - **A4:** take turns between the phone app and `budctl status` on the laptop. Each gets the
-  channel once the other has let go.
+  channel once the other has let go. (On the T310 with dual connection on, both work at once:
+  each host has a control link of its own.)
 
 <a id="decisions"></a>
 ## Decisions

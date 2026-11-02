@@ -114,7 +114,7 @@ Exit codes:
    10. ~~fit test~~ (dropped: the T310 acks it but runs no test)
    11. custom EQ
 4. **GUI** (`budctl-gui`, see [GUI](#gui)): first the look, with demo data; then the keys; then the live connection; then the pages, one at a time.
-5. **Android app** (`docs/android.md#steps`): a Kotlin app with budctl-core inside, to replace the other control app on the owner's phone. First the core builds for Android and the session worker moves into core; then the JNI crate, the Bluetooth link and a plain screen (phone checkpoints A1, A2); then the pages, one at a time.
+5. **Android app** (`docs/android.md#steps`): done in 0.1.4. A Kotlin app with budctl-core inside, replacing the other control app on the owner's phone: every desktop page, released as a signed `budctl.apk`, phone checkpoints A1–A4 passed.
 6. **More devices**: as acquired.
 
 ## GUI
