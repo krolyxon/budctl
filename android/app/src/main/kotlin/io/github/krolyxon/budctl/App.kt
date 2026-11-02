@@ -25,7 +25,8 @@ sealed interface Item {
 
     data class Switch(val key: String) : Item
 
-    data object Bass : Item
+    /** One band of bass boost: `low`, `medium` or `high`. */
+    data class Bass(val band: String) : Item
 
     /** A preset chosen, saved, renamed or deleted. */
     data class Preset(val id: Int) : Item
@@ -90,8 +91,8 @@ class App(
     var ancLevel by mutableStateOf("deep")
         private set
 
-    /** A bass level moved on the screen and not set on the buds yet. */
-    var bassDraft by mutableStateOf<Int?>(null)
+    /** Bass levels moved on the screen and not set on the buds yet, by band. */
+    var bassDraft by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
 
     /** "Turn dual connection off?" is open. */
@@ -159,18 +160,19 @@ class App(
         if (yes) command(Item.Switch(DUAL), JSONObject().put("command", "switch").put("key", DUAL).put("on", false))
     }
 
-    /** The bass level slider moved: shown at once, written when the finger lifts ([saveBass]). */
-    fun moveBass(level: Int) {
-        bassDraft = level
+    /** A band's bass slider moved: shown at once, written when the finger lifts ([saveBass]). */
+    fun moveBass(band: String, level: Int) {
+        bassDraft = bassDraft + (band to level)
     }
 
-    fun saveBass() {
-        val level = bassDraft ?: return
-        if (level == buds.bass) {
-            bassDraft = null
+    /** Writes a band's moved level. If one is on its way for that band, this one goes after it. */
+    fun saveBass(band: String) {
+        val level = bassDraft[band] ?: return
+        if (level == buds.bass[band]) {
+            bassDraft = bassDraft - band
             return
         }
-        command(Item.Bass, JSONObject().put("command", "bass").put("level", level))
+        command(Item.Bass(band), JSONObject().put("command", "bass").put("band", band).put("level", level))
     }
 
     fun selectPreset(id: Int) {
@@ -374,16 +376,18 @@ class App(
                         connection = Connection.Live
                     }
                     "bass" -> {
+                        val band = event.getString("band")
                         val level = event.getInt("level")
-                        buds = buds.copy(bass = level)
-                        if (bassDraft == level) bassDraft = null
+                        buds = buds.copy(bass = buds.bass + (band to level))
                         connection = Connection.Live
+                        // A level moved while this one was on its way goes out now.
+                        if (bassDraft[band] == level) bassDraft = bassDraft - band else saveBass(band)
                     }
                     "failed" -> {
                         val kind = event.getString("kind")
                         connection = Connection.Failed(kind, event.getString("message"))
                         if (kind == "not-found") buds = buds.copy(connected = false)
-                        if (item == Item.Bass) bassDraft = null
+                        if (item is Item.Bass) bassDraft = bassDraft - item.band
                         // The buds keep what they had: show that, not what was picked.
                         if (item is Item.Preset && draft?.preset == item.id) draft = null
                         if (item is Item.Gesture && touchDraft?.let { Item.Gesture(it.side, it.gesture) } == item) touchDraft = null
@@ -407,9 +411,9 @@ class App(
                 val on = json.getBoolean("on")
                 buds = buds.copy(switches = buds.switches.map { if (it.key == item.key) it.copy(on = on) else it })
             }
-            Item.Bass -> {
-                buds = buds.copy(bass = json.getInt("level"))
-                bassDraft = null
+            is Item.Bass -> {
+                buds = buds.copy(bass = buds.bass + (item.band to json.getInt("level")))
+                bassDraft = bassDraft - item.band
             }
             is Item.Preset, Item.NewPreset -> pretendEq(json)
             is Item.Gesture -> {

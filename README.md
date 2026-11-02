@@ -84,7 +84,8 @@ Exit codes:
 
 `budctl-gui` has five pages:
 
-- **Overview:** battery, noise control and its strength, the switches, the bass level.
+- **Overview:** battery, noise control and its strength, the switches, and bass boost band by band
+  (low, medium and high frequencies).
 - **Equalizer:** the presets; create, rename and delete your own, and change their bands.
 - **Gestures:** what each tap and hold does on each bud, and what a hold steps through.
 - **Earbud settings:** dual connection and the devices it keeps, find my earbuds, firmware, audio codec.

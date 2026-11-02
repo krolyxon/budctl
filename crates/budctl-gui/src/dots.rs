@@ -633,6 +633,7 @@ fn steps(since: Instant, every: Duration, now: Instant) -> (u128, Option<Instant
 #[cfg(test)]
 mod tests {
     use super::*;
+    use budctl_core::status::BassBand;
 
     fn slider(low: i16, high: i16) -> Slider<fn(i16, bool) -> Message> {
         Slider {
@@ -640,8 +641,8 @@ mod tests {
             high,
             value: 0,
             vertical: false,
-            change: |_, _| Message::SaveBass,
-            release: Message::SaveBass,
+            change: |_, _| Message::SaveBass(BassBand::Low),
+            release: Message::SaveBass(BassBand::Low),
             on: Color::WHITE,
             off: Color::BLACK,
             motion: false,

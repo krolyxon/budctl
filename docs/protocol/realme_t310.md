@@ -455,7 +455,7 @@ Evidence: *vendor*
 - **What budctl does:** `budctl bass <level>` refuses a level outside -5..+5 before sending anything.
 - **Expected frame** (*derived*), for `bass 3` with seq `05`: `AA 0A 00 00 1B 04 05 03 00 FB 05 03`.
 - **On the owner's T310** (*ours-2026-10-27*, W6b): `FB 05 FB` (-5), `FB 05 05` (+5) and `FB 05 00` (0) were each acked with a plain `0x841B 00` within 35 ms. Unlike the gesture write, the ack carries no data. Bass boost was off. By ear the owner heard at most a slight difference between -5 and +5. Whether the level does more with bass boost on is untested.
-- <a id="bass-bands"></a>**The band byte** (*vendor*). On realme buds whose bass engine is "dynamic sound", the vendor app shows bass boost as the switch `1D` and three sliders: low, medium and high frequencies. Each slider writes its own level, with a band byte after it:
+- <a id="bass-bands"></a>**The band byte** (*vendor*; the low band *ours-2026-11-02*, W6c). On realme buds whose bass engine is "dynamic sound", the vendor app shows bass boost as the switch `1D` and three sliders: low, medium and high frequencies. Each slider writes its own level, with a band byte after it:
 
   | Payload | Band |
   |---|---|
@@ -463,7 +463,7 @@ Evidence: *vendor*
   | `FB 05 <level s8> 02` | medium frequencies |
   | `FB 05 <level s8> 03` | high frequencies |
 
-  The T310 is one of these models. Such buds ignore a write without the band byte, yet still answer `00`. That fits W6b: the band-less writes were acked, and changed nothing clear by ear. The owner also hears no difference with bass boost on (2026-11-02), which fits three bands still at their default level. `budctl bass <band> <level>` sends the band byte, for checkpoint W6c ([roadmap](#roadmap)). The desktop and Android apps keep the band-less write until W6c passes, then move to three sliders.
+  The T310 is one of these models. Such buds ignore a write without the band byte, yet still answer `00`. That fits W6b: the band-less writes were acked, and changed nothing clear by ear. The owner also hears no difference with bass boost on (2026-11-02), which fits three bands still at their default level. budctl sends the band byte: `budctl bass <band> <level>`, and one slider per band in the desktop and Android apps. **On the owner's T310** (*ours-2026-11-02*, W6c): with bass boost on, the low band at +5 and at -5 sound definitely different. The band-less write is not sent any more.
 - **Expected frame with the band** (*derived*), for `bass low 3` with seq `05`: `AA 0B 00 00 1B 04 05 04 00 FB 05 03 01`.
 
 <a id="find"></a>
@@ -628,6 +628,7 @@ The owner will not install realme Link (2026-10-27), so there is no app capture.
 
 | Date | Checkpoint | Result | Notes |
 |---|---|---|---|
+| 2026-11-02 | W6c `set bass-boost on`, then `bass low 5`, `bass low -5`, `bass low 5` | pass | Each write went out byte for byte as the derived frame (`AA 0B 00 00 1B 04 05 04 00 FB 05 05 01` for +5, `FB` in the level byte for -5) and was acked with `0x841B 00` within 20-36 ms. The owner heard a definite difference between +5 and -5, where W6b's band-less writes changed nothing clear. The medium and high bands (`02`, `03`) were not tried by ear. See [§10.4](#bass-bands) |
 | 2026-11-02 | A4 Android app (v0.1.4) and `budctl status` on the laptop | pass (owner's report) | `budctl status` on the laptop works while the Android app is open and connected, not only once the app has let go: with dual connection on, the T310 gives each host a control link of its own, as with a phone app on 2026-10-27. No log was taken of this run |
 | 2026-11-01 | A3 Android app, Gestures and Earbud settings pages | pass | Right double tap set to `none` and back to `play-pause`, each written (`0x0401`) and read back in about 1 s. Six hold-cycle writes (`0x0404 02 01`), each acked and read back in 0.25-1.8 s, ending at off → anc as before. Ring and Stop (`0x0400 01`/`00`) acked; the buds rang. The devices list showed. The owner confirmed it all on screen |
 | 2026-11-01 | A3 Android app, Equalizer page: built-in presets, the custom one, its bands, a new preset, a delete | pass | Each built-in preset (`0x0406`) and the custom one were put in use and read back in 0.25-0.45 s. Fifteen band saves on `custom-4` were each acked and read back in 0.4-0.7 s; bands moved while a save was on its way went out as soon as it was answered, the latest winning. "New preset" created `custom-5` and opened its bands, five saves went to it, and the bin deleted it. Rename was not tried on the phone |

@@ -503,16 +503,8 @@ impl Session for T310Session {
             .then_some(codec::BASS_RANGE)
     }
 
-    fn set_bass_level(&mut self, level: i8) -> Result<()> {
-        let payload = codec::bass_write_payload(level)?;
-        if !self.commands.allows(codec::BASS_LEVEL_WRITE) {
-            return Err(Error::Unsupported("these buds do not offer a bass level".to_owned()));
-        }
-        let reply = self.link.request(codec::BASS_LEVEL_WRITE, &payload)?;
-        codec::check_write_reply(&reply, "the bass-level change")
-    }
-
-    /// Ack-only too: the T310 never answers the bass-level read. Spec: realme_t310.md#bass-bands
+    /// Ack-only: the T310 never answers the bass-level read. A level without its band is ignored,
+    /// so there is no band-less write. Spec: realme_t310.md#bass-bands
     fn set_bass_band(&mut self, band: BassBand, level: i8) -> Result<()> {
         let payload = codec::bass_band_payload(band, level)?;
         if !self.commands.allows(codec::BASS_LEVEL_WRITE) {
@@ -1358,17 +1350,6 @@ mod tests {
     }
 
     #[test]
-    fn sets_the_bass_level() {
-        let mut steps = handshake();
-        steps.extend([tx(0x041B, 0x05, "FB 05 FE"), rx(0x841B, 0x05, "00")]);
-        let script = Script::new(steps);
-        let mut session = open(&script).unwrap();
-        assert_eq!(session.bass_range(), Some((-5, 5)));
-        session.set_bass_level(-2).unwrap();
-        script.assert_done();
-    }
-
-    #[test]
     fn sets_a_bass_band_with_its_band_byte() {
         let mut steps = handshake();
         steps.extend([
@@ -1379,6 +1360,7 @@ mod tests {
         ]);
         let script = Script::new(steps);
         let mut session = open(&script).unwrap();
+        assert_eq!(session.bass_range(), Some((-5, 5)));
         session.set_bass_band(BassBand::Low, 5).unwrap();
         session.set_bass_band(BassBand::High, -5).unwrap();
         script.assert_done();
@@ -1399,7 +1381,7 @@ mod tests {
         let mut steps = handshake();
         steps.pop();
         let script = Script::new(steps);
-        let result = open(&script).unwrap().set_bass_level(6);
+        let result = open(&script).unwrap().set_bass_band(BassBand::Low, 6);
         script.assert_done();
         assert!(matches!(result, Err(Error::Usage(_))));
     }

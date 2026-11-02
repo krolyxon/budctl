@@ -1,10 +1,10 @@
 //! The Overview page: battery, noise control, the switches, and the way to the other pages.
 
-use budctl_core::status::{AncLevel, Charge, NoiseMode, Switch};
+use budctl_core::status::{AncLevel, BassBand, Charge, NoiseMode, Switch};
 use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
 
-use crate::buds::Buds;
+use crate::buds::{BassLevels, Buds};
 use crate::dots;
 use crate::equalizer;
 use crate::icons::{self, Icon};
@@ -24,25 +24,25 @@ pub fn items(buds: &Buds) -> Vec<Item> {
     for switch in shown(&buds.status.switches) {
         items.push(Item::Switch(switch.key));
         if switch.key == BASS_BOOST && buds.bass_range.is_some() {
-            items.push(Item::Bass);
+            items.extend(BassBand::ALL.map(Item::Bass));
         }
     }
     items.extend(MORE.map(|(page, _, _)| Item::Open(page)));
     items
 }
 
-/// The switch the bass level shows under.
+/// The switch the bass levels show under.
 const BASS_BOOST: &str = "bass-boost";
 
 /// Shown instead of an item's subtitle while a write to it is on its way.
 const SAVING: &str = "Saving…";
 
-/// `bass`: a bass level moved on the screen and not set on the buds yet.
+/// `bass`: bass levels moved on the screen and not set on the buds yet.
 pub fn view<'a>(
     look: Look,
     buds: &'a Buds,
     anc_level: AncLevel,
-    bass: Option<i8>,
+    bass: BassLevels,
     marks: Marks,
 ) -> Element<'a, Message> {
     column![
@@ -155,7 +155,7 @@ fn shown(switches: &[Switch]) -> Vec<&Switch> {
     shown
 }
 
-fn switches<'a>(look: Look, buds: &Buds, bass: Option<i8>, marks: Marks) -> Element<'a, Message> {
+fn switches<'a>(look: Look, buds: &Buds, bass: BassLevels, marks: Marks) -> Element<'a, Message> {
     let known = |key: &str| SWITCHES.iter().find(|(k, _, _)| *k == key);
     let mut rows = Vec::new();
     for s in shown(&buds.status.switches) {
@@ -174,20 +174,34 @@ fn switches<'a>(look: Look, buds: &Buds, bass: Option<i8>, marks: Marks) -> Elem
             )
         });
         if let (BASS_BOOST, Some(range)) = (s.key, buds.bass_range) {
-            rows.push(bass_level(look, range, bass.or(buds.bass), marks));
+            for band in BassBand::ALL {
+                let level = bass.get(band).or(buds.bass.get(band));
+                rows.push(bass_level(look, range, band, level, marks));
+            }
         }
     }
     ui::card(look, rows)
 }
 
-/// The bass level: the buds take it but do not report it, so the row shows the last level set
-/// from this window, if any.
-fn bass_level<'a>(look: Look, (low, high): (i8, i8), level: Option<i8>, marks: Marks) -> Element<'a, Message> {
+/// One band of bass boost: the buds take its level but do not report it, so the row shows the last
+/// level set from this window, if any.
+fn bass_level<'a>(
+    look: Look,
+    (low, high): (i8, i8),
+    band: BassBand,
+    level: Option<i8>,
+    marks: Marks,
+) -> Element<'a, Message> {
     let p = look.p;
-    let about = if marks.pending.contains(&Item::Bass) {
+    let about = if marks.pending.contains(&Item::Bass(band)) {
         SAVING
     } else {
-        "Last set here: the buds do not report it"
+        "Bass boost, last set here"
+    };
+    let title = match band {
+        BassBand::Low => "Low frequencies",
+        BassBand::Medium => "Medium frequencies",
+        BassBand::High => "High frequencies",
     };
     let shown = level.map_or_else(|| "not set".to_owned(), equalizer::gain);
     let slider = dots::Slider {
@@ -195,11 +209,12 @@ fn bass_level<'a>(look: Look, (low, high): (i8, i8), level: Option<i8>, marks: M
         high: i16::from(high),
         value: i16::from(level.unwrap_or(0)),
         vertical: false,
-        change: |level, save| Message::Bass {
+        change: move |level, save| Message::Bass {
+            band,
             level: i8::try_from(level).unwrap_or(0),
             save,
         },
-        release: Message::SaveBass,
+        release: Message::SaveBass(band),
         on: p.fill,
         off: p.s3,
         motion: look.motion,
@@ -210,11 +225,11 @@ fn bass_level<'a>(look: Look, (low, high): (i8, i8), level: Option<i8>, marks: M
     ui::setting(
         look,
         Icon::Bass,
-        "Bass level",
+        title,
         Some(about.to_owned()),
         control.into(),
         None,
-        marks.focus == Some(Item::Bass),
+        marks.focus == Some(Item::Bass(band)),
     )
 }
 

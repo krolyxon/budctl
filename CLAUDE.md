@@ -107,7 +107,7 @@ Exit codes:
    3. game mode
    4. EQ preset
    5. switches (bass boost, 3D sound, wind; dual connection last)
-   6. bass level
+   6. bass level (per band: low, medium, high)
    7. find
    8. touch controls
    9. hold cycle

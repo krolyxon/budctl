@@ -57,10 +57,10 @@ data class Buds(
     val firmware: String? = null,
     val presets: EqPresets? = null,
     val touch: TouchControls? = null,
-    /** The levels the bass level takes, when the buds have one to set. */
+    /** The levels each band of bass boost takes, when the buds have bass levels to set. */
     val bassRange: IntRange? = null,
-    /** The bass level last set from this app: the buds do not report it. */
-    val bass: Int? = null,
+    /** The level of each band of bass boost (`low`, `medium`, `high`) last set from this app: the buds do not report them. */
+    val bass: Map<String, Int> = emptyMap(),
     val dual: List<DualDevice>? = null,
 ) {
     /** The name to show for the EQ preset in use (crates/budctl-gui/src/buds.rs, `eq_name`). */

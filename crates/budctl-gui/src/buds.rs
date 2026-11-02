@@ -3,9 +3,36 @@
 
 use budctl_core::bt::BdAddr;
 use budctl_core::status::{
-    Battery, Charge, DualDevice, EqBand, EqPreset, EqPresets, Gesture, GestureChoice, NoiseControl, Status, Switch,
-    TouchControls,
+    BassBand, Battery, Charge, DualDevice, EqBand, EqPreset, EqPresets, Gesture, GestureChoice, NoiseControl, Status,
+    Switch, TouchControls,
 };
+
+/// A bass level for each band of bass boost, where one is known.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BassLevels {
+    low: Option<i8>,
+    medium: Option<i8>,
+    high: Option<i8>,
+}
+
+impl BassLevels {
+    pub fn get(self, band: BassBand) -> Option<i8> {
+        match band {
+            BassBand::Low => self.low,
+            BassBand::Medium => self.medium,
+            BassBand::High => self.high,
+        }
+    }
+
+    pub fn set(&mut self, band: BassBand, level: Option<i8>) {
+        let slot = match band {
+            BassBand::Low => &mut self.low,
+            BassBand::Medium => &mut self.medium,
+            BassBand::High => &mut self.high,
+        };
+        *slot = level;
+    }
+}
 
 /// The buds the window shows.
 pub struct Buds {
@@ -16,10 +43,10 @@ pub struct Buds {
     pub eq: Option<EqPresets>,
     /// The touch controls, when the buds report them.
     pub touch: Option<TouchControls>,
-    /// The levels the bass level takes, when the buds have one to set.
+    /// The levels each band of bass boost takes, when the buds have bass levels to set.
     pub bass_range: Option<(i8, i8)>,
-    /// The bass level last set from this window. The buds do not report it.
-    pub bass: Option<i8>,
+    /// The bass level of each band, as last set from this window. The buds do not report them.
+    pub bass: BassLevels,
     /// The devices dual connection keeps, when the buds list them.
     pub dual: Option<Vec<DualDevice>>,
 }
@@ -185,7 +212,7 @@ pub fn demo() -> Buds {
             warnings: Vec::new(),
         }),
         bass_range: Some((-5, 5)),
-        bass: None,
+        bass: BassLevels::default(),
         dual: Some(vec![
             DualDevice {
                 address: BdAddr::new([0x2B, 0x1A, 0x00, 0xAA, 0xBB, 0xCC]),
@@ -216,7 +243,7 @@ pub fn unknown() -> Buds {
         eq: None,
         touch: None,
         bass_range: None,
-        bass: None,
+        bass: BassLevels::default(),
         dual: None,
     }
 }

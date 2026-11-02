@@ -28,12 +28,13 @@ use std::time::{Duration, Instant};
 
 use budctl_core::Kind;
 use budctl_core::bt::BdAddr;
-use budctl_core::status::{AncLevel, EqBand, EqPreset, NoiseControl, NoiseMode, Switch};
+use budctl_core::status::{AncLevel, BassBand, EqBand, EqPreset, NoiseControl, NoiseMode, Switch};
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::operation::{self, RelativeOffset};
 use iced::widget::{Column, column, container, mouse_area, opaque, row, scrollable, space, stack, text, text_input};
 use iced::{Alignment, Border, Element, Length, Size, Subscription, Task, Theme, event, mouse, window};
 
+use buds::BassLevels;
 use keys::Action;
 use theme::Look;
 use worker::{Command, Event, Reading};
@@ -268,8 +269,8 @@ enum Item {
     Cycle(u8),
     /// Find my earbuds.
     Find,
-    /// The bass level.
-    Bass,
+    /// One band's bass level.
+    Bass(BassBand),
     /// "New preset", on the Equalizer page.
     NewPreset,
     /// "Rename", on a custom EQ preset's card.
@@ -400,13 +401,14 @@ enum Message {
     Find,
     /// The answer to "Ring the buds?".
     ConfirmFind(bool),
-    /// Move the bass level. With `save`, set it on the buds right away, else when
+    /// Move one band's bass level. With `save`, set it on the buds right away, else when
     /// [`Message::SaveBass`] comes (the mouse lets go of the slider).
     Bass {
+        band: BassBand,
         level: i8,
         save: bool,
     },
-    SaveBass,
+    SaveBass(BassBand),
     /// Ask for a new preset's name.
     NewPreset,
     /// Ask for a custom preset's (by its id) new name.
@@ -473,8 +475,8 @@ struct App {
     draft: Option<Draft>,
     /// A gesture's action picked and not written yet.
     touch_draft: Option<TouchDraft>,
-    /// A bass level moved and not set yet.
-    bass_draft: Option<i8>,
+    /// Bass levels moved and not set yet, band by band.
+    bass_draft: BassLevels,
     /// The buds were told to ring and not yet to stop.
     ringing: bool,
     /// "Ring the buds?" is open.
@@ -535,7 +537,7 @@ impl App {
             read_at: None,
             draft: None,
             touch_draft: None,
-            bass_draft: None,
+            bass_draft: BassLevels::default(),
             ringing: false,
             confirm_find: false,
             palette_problem: None,
@@ -602,14 +604,14 @@ impl App {
                 }
             }
             Message::ShowHelp => self.help = true,
-            Message::Bass { level, save } => {
+            Message::Bass { band, level, save } => {
                 let (low, high) = self.buds.bass_range.unwrap_or((i8::MIN, i8::MAX));
-                self.bass_draft = Some(level.clamp(low, high));
+                self.bass_draft.set(band, Some(level.clamp(low, high)));
                 if save {
-                    self.save_bass();
+                    self.save_bass(band);
                 }
             }
-            Message::SaveBass => self.save_bass(),
+            Message::SaveBass(band) => self.save_bass(band),
             Message::NewPreset => return self.ask_name(NameTarget::New, String::new()),
             Message::RenamePreset(id) => {
                 let name = self.buds.preset(id).map(|p| p.name.clone()).unwrap_or_default();
@@ -802,9 +804,9 @@ impl App {
                     }
                 }
                 Command::Find(ring) => self.ringing = ring,
-                Command::Bass(level) => {
-                    self.buds.bass = Some(level);
-                    self.bass_draft = None;
+                Command::Bass(band, level) => {
+                    self.buds.bass.set(band, Some(level));
+                    self.bass_draft.set(band, None);
                 }
                 Command::CreateEq(name) => {
                     let customs = || {
@@ -958,12 +960,12 @@ impl App {
                     self.editing = equalizer::in_use(&self.buds).map(|preset| preset.id);
                 }
             }
-            Event::Bass(level) => {
+            Event::Bass(band, level) => {
                 self.in_flight.pop_front();
-                self.buds.bass = Some(level);
+                self.buds.bass.set(band, Some(level));
                 self.link = Link::Live;
                 // A level moved while this one was on its way goes out now.
-                self.save_bass();
+                self.save_bass(band);
             }
             Event::Ringing(ring) => {
                 self.in_flight.pop_front();
@@ -986,7 +988,7 @@ impl App {
                     Some(Some(Item::Gesture(row))) if self.touch_draft.as_ref().is_some_and(|d| d.row == row) => {
                         self.touch_draft = None;
                     }
-                    Some(Some(Item::Bass)) => self.bass_draft = None,
+                    Some(Some(Item::Bass(band))) => self.bass_draft.set(band, None),
                     _ => {}
                 }
                 if kind == Kind::NotFound {
@@ -1187,16 +1189,16 @@ impl App {
         }
     }
 
-    /// Sets the bass level moved on the screen. If a level is on its way, this one goes out
-    /// when that is answered: the latest level wins.
-    fn save_bass(&mut self) {
-        let Some(level) = self.bass_draft else {
+    /// Sets a band's bass level moved on the screen. If a level for that band is on its way,
+    /// this one goes out when that is answered: the latest level wins.
+    fn save_bass(&mut self, band: BassBand) {
+        let Some(level) = self.bass_draft.get(band) else {
             return;
         };
-        if self.buds.bass == Some(level) {
-            self.bass_draft = None;
-        } else if !self.pending().contains(&Item::Bass) {
-            self.write(Item::Bass, Command::Bass(level));
+        if self.buds.bass.get(band) == Some(level) {
+            self.bass_draft.set(band, None);
+        } else if !self.pending().contains(&Item::Bass(band)) {
+            self.write(Item::Bass(band), Command::Bass(band, level));
         }
     }
 
@@ -1391,9 +1393,9 @@ impl App {
             Item::Delete(id) => (action != Action::Left).then_some(Message::DeletePreset(id)),
             Item::Edit(id) => (action != Action::Left).then_some(Message::EditPreset(id)),
             Item::Done => (action != Action::Left).then_some(Message::DoneEditing),
-            Item::Bass => {
+            Item::Bass(band) => {
                 let (low, high) = self.buds.bass_range?;
-                let now = self.bass_draft.or(self.buds.bass);
+                let now = self.bass_draft.get(band).or(self.buds.bass.get(band));
                 let to = match (action, now) {
                     // Not set yet: the first step starts from the middle.
                     (Action::Left | Action::Right, None) => 0,
@@ -1401,7 +1403,11 @@ impl App {
                     (Action::Right, Some(level)) => level.checked_add(1)?.min(high),
                     _ => return None,
                 };
-                (Some(to) != now).then_some(Message::Bass { level: to, save: true })
+                (Some(to) != now).then_some(Message::Bass {
+                    band,
+                    level: to,
+                    save: true,
+                })
             }
             Item::Cycle(mode) => {
                 let touch = self.buds.touch.as_ref()?;
@@ -1919,7 +1925,9 @@ mod tests {
                 Item::Switch("game"),
                 Item::Switch("spatial"),
                 Item::Switch("bass-boost"),
-                Item::Bass,
+                Item::Bass(BassBand::Low),
+                Item::Bass(BassBand::Medium),
+                Item::Bass(BassBand::High),
                 Item::Switch("wind"),
                 Item::Switch("dual"),
                 Item::Open(Page::Equalizer),
@@ -2091,7 +2099,8 @@ mod tests {
         assert_eq!(app.link, Link::Live);
         assert_eq!(app.buds.name, "realme Buds T310");
         assert!(app.buds.connected);
-        assert_eq!(app.items().len(), 11);
+        // The noise control and its strength, five switches, three bass bands, three pages.
+        assert_eq!(app.items().len(), 13);
     }
 
     #[test]
@@ -2338,17 +2347,33 @@ mod tests {
     }
 
     #[test]
-    fn the_bass_level_by_key() {
+    fn the_bass_levels_by_key() {
         let mut app = app();
         press(&mut app, "j j j j j j");
-        assert_eq!(app.focus(), Some(Item::Bass), "under bass boost, on the Overview");
-        assert_eq!(app.buds.bass, None, "the buds do not say");
+        assert_eq!(
+            app.focus(),
+            Some(Item::Bass(BassBand::Low)),
+            "under bass boost, on the Overview"
+        );
+        assert_eq!(app.buds.bass.get(BassBand::Low), None, "the buds do not say");
         press(&mut app, "l");
-        assert_eq!(app.buds.bass, Some(0), "the first step starts from the middle");
+        assert_eq!(
+            app.buds.bass.get(BassBand::Low),
+            Some(0),
+            "the first step starts from the middle"
+        );
         press(&mut app, "l l");
-        assert_eq!(app.buds.bass, Some(2));
+        assert_eq!(app.buds.bass.get(BassBand::Low), Some(2));
         press(&mut app, "h h h h h h h h");
-        assert_eq!(app.buds.bass, Some(-5), "it stops at the bottom");
+        assert_eq!(app.buds.bass.get(BassBand::Low), Some(-5), "it stops at the bottom");
+        press(&mut app, "j l");
+        assert_eq!(app.focus(), Some(Item::Bass(BassBand::Medium)));
+        assert_eq!(
+            app.buds.bass.get(BassBand::Medium),
+            Some(0),
+            "each band has its own level"
+        );
+        assert_eq!(app.buds.bass.get(BassBand::Low), Some(-5));
     }
 
     #[test]
@@ -2356,20 +2381,38 @@ mod tests {
         let (mut app, commands) = live();
         let _ = commands.try_recv();
         let _ = app.update(Message::Worker(Event::Read(Box::new(reading()))));
-        let _ = app.update(Message::Bass { level: 2, save: false });
+        let low = BassBand::Low;
+        let _ = app.update(Message::Bass {
+            band: low,
+            level: 2,
+            save: false,
+        });
         assert!(
             commands.try_recv().is_err(),
             "a drag sends nothing until the mouse lets go"
         );
-        let _ = app.update(Message::SaveBass);
-        assert!(matches!(commands.try_recv(), Ok(Command::Bass(2))));
-        let _ = app.update(Message::Bass { level: 4, save: true });
+        let _ = app.update(Message::SaveBass(low));
+        assert!(matches!(commands.try_recv(), Ok(Command::Bass(BassBand::Low, 2))));
+        let _ = app.update(Message::Bass {
+            band: low,
+            level: 4,
+            save: true,
+        });
         assert!(commands.try_recv().is_err());
-        let _ = app.update(Message::Worker(Event::Bass(2)));
-        assert!(matches!(commands.try_recv(), Ok(Command::Bass(4))));
-        let _ = app.update(Message::Worker(Event::Bass(4)));
-        assert_eq!(app.buds.bass, Some(4));
-        assert_eq!(app.bass_draft, None);
+        // Another band does not wait for this one.
+        let _ = app.update(Message::Bass {
+            band: BassBand::High,
+            level: -1,
+            save: true,
+        });
+        assert!(matches!(commands.try_recv(), Ok(Command::Bass(BassBand::High, -1))));
+        let _ = app.update(Message::Worker(Event::Bass(low, 2)));
+        assert!(matches!(commands.try_recv(), Ok(Command::Bass(BassBand::Low, 4))));
+        let _ = app.update(Message::Worker(Event::Bass(BassBand::High, -1)));
+        let _ = app.update(Message::Worker(Event::Bass(low, 4)));
+        assert_eq!(app.buds.bass.get(low), Some(4));
+        assert_eq!(app.buds.bass.get(BassBand::High), Some(-1));
+        assert_eq!(app.bass_draft, BassLevels::default());
         assert!(commands.try_recv().is_err());
     }
 

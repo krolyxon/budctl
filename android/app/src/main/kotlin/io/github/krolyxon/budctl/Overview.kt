@@ -111,26 +111,29 @@ private fun Switches(app: App) {
                 if (app.saving(Item.Switch(s.key))) SAVING else known?.third,
                 onClick = { app.switch(s.key, !s.on) },
             ) { Toggle(s.on) }
-            if (s.key == "bass-boost") buds.bassRange?.let { BassLevel(app, it) }
+            if (s.key == "bass-boost") buds.bassRange?.let { range -> for ((band, title) in BASS_BANDS) BassLevel(app, range, band, title) }
         }
     }
 }
 
-/** The bass level: the buds take it but do not report it, so the row shows the last level set here. */
+/** The bands of bass boost, as the buds and the rows name them. */
+private val BASS_BANDS = listOf("low" to "Low frequencies", "medium" to "Medium frequencies", "high" to "High frequencies")
+
+/** One band of bass boost: the buds take its level but do not report it, so the row shows the last level set here. */
 @Composable
-private fun BassLevel(app: App, range: IntRange) {
-    val level = app.bassDraft ?: app.buds.bass
+private fun BassLevel(app: App, range: IntRange, band: String, title: String) {
+    val level = app.bassDraft[band] ?: app.buds.bass[band]
     SettingRow(
         Icon.Bass,
-        "Bass level",
-        if (app.saving(Item.Bass)) SAVING else "Last set here: the buds do not report it",
+        title,
+        if (app.saving(Item.Bass(band))) SAVING else "Bass boost, last set here",
         below = {
             DotSlider(
                 range.first,
                 range.last,
                 level ?: 0,
-                change = app::moveBass,
-                release = app::saveBass,
+                change = { app.moveBass(band, it) },
+                release = { app.saveBass(band) },
                 modifier = Modifier.padding(start = 52.dp, top = 6.dp),
             )
         },

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::devices::Session;
 use crate::error::{Error, Kind, Result};
 use crate::status::{
-    DualDevice, EqBand, EqPreset, EqPresets, Gesture, NoiseControl, NoiseMode, Status, Switch, TouchControls,
+    BassBand, DualDevice, EqBand, EqPreset, EqPresets, Gesture, NoiseControl, NoiseMode, Status, Switch, TouchControls,
 };
 
 /// How long the session stays open after the last command, unless the front end says otherwise.
@@ -43,8 +43,8 @@ pub enum Command {
     HoldCycle(Vec<String>),
     /// Start (`true`) or stop ringing the buds.
     Find(bool),
-    /// Set the bass level.
-    Bass(i8),
+    /// Set the bass level of one band of bass boost.
+    Bass(BassBand, i8),
     /// Create a custom EQ preset with this name.
     CreateEq(String),
     /// Give a custom EQ preset (`custom-<id>`) a new name.
@@ -73,8 +73,8 @@ pub enum Event {
     HoldCycle(Vec<String>),
     /// The answer to [`Command::Find`]: whether the buds were told to ring.
     Ringing(bool),
-    /// The answer to [`Command::Bass`]: the level the buds took.
-    Bass(i8),
+    /// The answer to [`Command::Bass`]: the band, and the level the buds took for it.
+    Bass(BassBand, i8),
     /// The answer to [`Command::CreateEq`] and [`Command::DeleteEq`]: the whole preset list after
     /// it (ids can change).
     Presets(EqPresets),
@@ -226,10 +226,10 @@ impl Worker {
                 .session()
                 .and_then(|session| session.rename_custom_eq(&preset, &name))
                 .map(Event::CustomEq),
-            Command::Bass(level) => self
+            Command::Bass(band, level) => self
                 .session()
-                .and_then(|session| session.set_bass_level(level))
-                .map(|()| Event::Bass(level)),
+                .and_then(|session| session.set_bass_band(band, level))
+                .map(|()| Event::Bass(band, level)),
             Command::Find(ring) => self
                 .session()
                 .and_then(|session| session.find(ring))

@@ -4,7 +4,7 @@
 //! as `{"event": "noise", "mode": "anc", "level": "deep"}`. The values are the status types the
 //! CLI's `--json` writes, except that switches keep their labels.
 
-use budctl_core::status::{AncLevel, EqBand, NoiseMode, Status};
+use budctl_core::status::{AncLevel, BassBand, EqBand, NoiseMode, Status};
 use budctl_core::worker::{Command, Event};
 use budctl_core::{Error, Kind, PairedDevice, Result};
 use serde::Deserialize;
@@ -44,7 +44,9 @@ enum Request {
     Find {
         ring: bool,
     },
+    /// One band of bass boost: `low`, `medium` or `high`.
     Bass {
+        band: String,
         level: i8,
     },
     CreateEq {
@@ -87,11 +89,18 @@ pub fn command(json: &str) -> Result<Command> {
         Request::Touch { side, gesture, action } => Command::Touch { side, gesture, action },
         Request::HoldCycle { modes } => Command::HoldCycle(modes),
         Request::Find { ring } => Command::Find(ring),
-        Request::Bass { level } => Command::Bass(level),
+        Request::Bass { band, level } => Command::Bass(bass_band(&band)?, level),
         Request::CreateEq { name } => Command::CreateEq(name),
         Request::RenameEq { preset, name } => Command::RenameEq(preset, name),
         Request::DeleteEq { preset } => Command::DeleteEq(preset),
     })
+}
+
+fn bass_band(name: &str) -> Result<BassBand> {
+    BassBand::ALL
+        .into_iter()
+        .find(|band| band.name() == name)
+        .ok_or_else(|| Error::Usage(format!("no bass band {name:?}: low, medium or high")))
 }
 
 /// `anc` with no level is the deepest, as `budctl anc on` is.
@@ -132,7 +141,10 @@ pub fn event(event: &Event) -> serde_json::Result<String> {
         Event::Touch(gestures) => ("touch", vec![("gestures", to_value(gestures)?)]),
         Event::HoldCycle(modes) => ("hold-cycle", vec![("modes", to_value(modes)?)]),
         Event::Ringing(ring) => ("ringing", vec![("ring", Value::from(*ring))]),
-        Event::Bass(level) => ("bass", vec![("level", Value::from(*level))]),
+        Event::Bass(band, level) => (
+            "bass",
+            vec![("band", Value::from(band.name())), ("level", Value::from(*level))],
+        ),
         Event::Presets(eq) => ("presets", vec![("eq", to_value(eq)?)]),
         Event::Failed { kind, message } => (
             "failed",
@@ -251,6 +263,10 @@ mod tests {
             command(r#"{"command": "hold-cycle", "modes": ["off", "anc"]}"#),
             Ok(Command::HoldCycle(modes)) if modes == ["off", "anc"]
         ));
+        assert!(matches!(
+            command(r#"{"command": "bass", "band": "medium", "level": -2}"#),
+            Ok(Command::Bass(BassBand::Medium, -2))
+        ));
     }
 
     #[test]
@@ -259,7 +275,9 @@ mod tests {
             r#"{"command": "reboot"}"#,
             r#"{"command": "noise", "mode": "loud"}"#,
             r#"{"command": "noise", "mode": "off", "level": "deep"}"#,
-            r#"{"command": "bass", "level": 300}"#,
+            r#"{"command": "bass", "band": "low", "level": 300}"#,
+            r#"{"command": "bass", "band": "deep", "level": 1}"#,
+            r#"{"command": "bass", "level": 1}"#,
             "not json",
         ] {
             assert_eq!(command(json).err().map(|e| e.kind()), Some(Kind::Usage), "{json}");
@@ -292,6 +310,10 @@ mod tests {
         assert_eq!(
             parse(&Event::Ringing(true)),
             serde_json::json!({"event": "ringing", "ring": true})
+        );
+        assert_eq!(
+            parse(&Event::Bass(BassBand::High, 3)),
+            serde_json::json!({"event": "bass", "band": "high", "level": 3})
         );
     }
 

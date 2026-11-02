@@ -81,8 +81,8 @@ pub trait Session: Send {
         )))
     }
 
-    /// The lowest and the highest level [`Session::set_bass_level`] takes, when the buds have a
-    /// bass level to set.
+    /// The lowest and the highest level [`Session::set_bass_band`] takes, when the buds have bass
+    /// levels to set.
     fn bass_range(&self) -> Option<(i8, i8)> {
         None
     }
@@ -109,13 +109,6 @@ pub trait Session: Send {
         Err(Error::Unsupported(format!(
             "budctl cannot delete {preset} on these buds"
         )))
-    }
-
-    /// Set the bass level. Only the ack can be checked when the buds cannot report the level.
-    fn set_bass_level(&mut self, _level: i8) -> Result<()> {
-        Err(Error::Unsupported(
-            "budctl cannot change the bass level on these buds".to_owned(),
-        ))
     }
 
     /// Set the level of one band of bass boost, on buds that set it band by band. Only the ack can
