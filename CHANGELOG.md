@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.6 (2026-11-02)
+
+The Android app can keep itself up to date, if you let it.
 
 - The Android app can update itself. Switch on **Check for updates** on its App page, and once a
   day it asks GitHub for budctl's latest release and offers it, with its notes. **Check now**
