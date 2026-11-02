@@ -7,7 +7,8 @@ use crate::PairedDevice;
 use crate::bt::Uuid;
 use crate::error::{Error, Result};
 use crate::status::{
-    DualDevice, EqBand, EqPreset, EqPresets, NoiseControl, NoiseMode, Status, Switch, TouchChange, TouchControls,
+    BassBand, DualDevice, EqBand, EqPreset, EqPresets, NoiseControl, NoiseMode, Status, Switch, TouchChange,
+    TouchControls,
 };
 use crate::transport::Transport;
 
@@ -114,6 +115,14 @@ pub trait Session: Send {
     fn set_bass_level(&mut self, _level: i8) -> Result<()> {
         Err(Error::Unsupported(
             "budctl cannot change the bass level on these buds".to_owned(),
+        ))
+    }
+
+    /// Set the level of one band of bass boost, on buds that set it band by band. Only the ack can
+    /// be checked when the buds cannot report the level.
+    fn set_bass_band(&mut self, _band: BassBand, _level: i8) -> Result<()> {
+        Err(Error::Unsupported(
+            "budctl cannot change the bass bands on these buds".to_owned(),
         ))
     }
 

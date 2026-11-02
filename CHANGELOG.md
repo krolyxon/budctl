@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `budctl bass` sets bass boost band by band: `budctl bass low|medium|high <level>`. The buds
+  ignored the old `budctl bass <level>`: they need to know which band the level is for.
+
 ## 0.1.4 (2026-11-01)
 
 budctl comes to Android, and gets an icon.

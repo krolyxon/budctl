@@ -153,6 +153,28 @@ pub struct EqPreset {
     pub range: Option<(i8, i8)>,
 }
 
+/// A frequency band of bass boost, on buds that set its level band by band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BassBand {
+    Low,
+    Medium,
+    High,
+}
+
+impl BassBand {
+    pub const ALL: [BassBand; 3] = [BassBand::Low, BassBand::Medium, BassBand::High];
+
+    /// `low`, `medium` or `high`, as the command line and JSON name it.
+    pub fn name(self) -> &'static str {
+        match self {
+            BassBand::Low => "low",
+            BassBand::Medium => "medium",
+            BassBand::High => "high",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct EqBand {
     pub hz: u16,

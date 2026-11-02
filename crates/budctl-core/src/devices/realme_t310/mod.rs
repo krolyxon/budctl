@@ -10,8 +10,8 @@ use crate::bt::Uuid;
 use crate::devices::{Device, Session};
 use crate::error::{Error, Kind, Result};
 use crate::status::{
-    DualDevice, EqBand, EqPreset, EqPresets, GestureChange, NoiseControl, NoiseMode, RawWrite, Status, Switch,
-    TouchChange, TouchControls,
+    BassBand, DualDevice, EqBand, EqPreset, EqPresets, GestureChange, NoiseControl, NoiseMode, RawWrite, Status,
+    Switch, TouchChange, TouchControls,
 };
 use crate::transport::Transport;
 
@@ -510,6 +510,21 @@ impl Session for T310Session {
         }
         let reply = self.link.request(codec::BASS_LEVEL_WRITE, &payload)?;
         codec::check_write_reply(&reply, "the bass-level change")
+    }
+
+    /// Ack-only too: the T310 never answers the bass-level read. Spec: realme_t310.md#bass-bands
+    fn set_bass_band(&mut self, band: BassBand, level: i8) -> Result<()> {
+        let payload = codec::bass_band_payload(band, level)?;
+        if !self.commands.allows(codec::BASS_LEVEL_WRITE) {
+            return Err(Error::Unsupported("these buds do not offer a bass level".to_owned()));
+        }
+        let reply = self.link.request(codec::BASS_LEVEL_WRITE, &payload)?;
+        let what = match band {
+            BassBand::Low => "the low bass change",
+            BassBand::Medium => "the medium bass change",
+            BassBand::High => "the high bass change",
+        };
+        codec::check_write_reply(&reply, what)
     }
 
     /// Spec: realme_t310.md#find
@@ -1351,6 +1366,32 @@ mod tests {
         assert_eq!(session.bass_range(), Some((-5, 5)));
         session.set_bass_level(-2).unwrap();
         script.assert_done();
+    }
+
+    #[test]
+    fn sets_a_bass_band_with_its_band_byte() {
+        let mut steps = handshake();
+        steps.extend([
+            tx(0x041B, 0x05, "FB 05 05 01"),
+            rx(0x841B, 0x05, "00"),
+            tx(0x041B, 0x06, "FB 05 FB 03"),
+            rx(0x841B, 0x06, "00"),
+        ]);
+        let script = Script::new(steps);
+        let mut session = open(&script).unwrap();
+        session.set_bass_band(BassBand::Low, 5).unwrap();
+        session.set_bass_band(BassBand::High, -5).unwrap();
+        script.assert_done();
+    }
+
+    #[test]
+    fn a_refused_bass_band_says_which() {
+        let mut steps = handshake();
+        steps.extend([tx(0x041B, 0x05, "FB 05 02 02"), rx(0x841B, 0x05, "01")]);
+        let script = Script::new(steps);
+        let result = open(&script).unwrap().set_bass_band(BassBand::Medium, 2);
+        script.assert_done();
+        assert!(matches!(result, Err(Error::Rejected { what, .. }) if what.contains("medium")));
     }
 
     #[test]

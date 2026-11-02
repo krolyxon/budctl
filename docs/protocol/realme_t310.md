@@ -455,6 +455,16 @@ Evidence: *vendor*
 - **What budctl does:** `budctl bass <level>` refuses a level outside -5..+5 before sending anything.
 - **Expected frame** (*derived*), for `bass 3` with seq `05`: `AA 0A 00 00 1B 04 05 03 00 FB 05 03`.
 - **On the owner's T310** (*ours-2026-10-27*, W6b): `FB 05 FB` (-5), `FB 05 05` (+5) and `FB 05 00` (0) were each acked with a plain `0x841B 00` within 35 ms. Unlike the gesture write, the ack carries no data. Bass boost was off. By ear the owner heard at most a slight difference between -5 and +5. Whether the level does more with bass boost on is untested.
+- <a id="bass-bands"></a>**The band byte** (*vendor*). On realme buds whose bass engine is "dynamic sound", the vendor app shows bass boost as the switch `1D` and three sliders: low, medium and high frequencies. Each slider writes its own level, with a band byte after it:
+
+  | Payload | Band |
+  |---|---|
+  | `FB 05 <level s8> 01` | low frequencies |
+  | `FB 05 <level s8> 02` | medium frequencies |
+  | `FB 05 <level s8> 03` | high frequencies |
+
+  The T310 is one of these models. Such buds ignore a write without the band byte, yet still answer `00`. That fits W6b: the band-less writes were acked, and changed nothing clear by ear. The owner also hears no difference with bass boost on (2026-11-02), which fits three bands still at their default level. `budctl bass <band> <level>` sends the band byte, for checkpoint W6c ([roadmap](#roadmap)). The desktop and Android apps keep the band-less write until W6c passes, then move to three sliders.
+- **Expected frame with the band** (*derived*), for `bass low 3` with seq `05`: `AA 0B 00 00 1B 04 05 04 00 FB 05 03 01`.
 
 <a id="find"></a>
 ### 10.5 Find my earbuds: `0x0400 01` / `0x0400 00`
@@ -604,7 +614,7 @@ The owner runs each checkpoint with `--debug` and pastes the output. Results go 
 | W3 | `game on/off` |
 | W4 | `eq <preset>` |
 | W5 | `set bass-boost` → `set spatial` → `set wind` → `set dual`, each one checkpoint |
-| W6 | W6a: read `0x0124` with bass boost on; W6b: `bass <level>` |
+| W6 | W6a: read `0x0124` with bass boost on; W6b: `bass <level>`; W6c: `bass <band> <level>` with the band byte ([§10.4](#bass-bands)), bass boost on, by ear: each band at -5, then at +5 |
 | W7 | `find` |
 | W8 | `touch <side> <gesture> <action>` (`--dry-run` first) |
 | W9 | `touch cycle` |

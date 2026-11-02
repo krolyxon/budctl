@@ -5,7 +5,8 @@ use std::io::{self, Write};
 use budctl_core::PairedDevice;
 use budctl_core::devices::Device;
 use budctl_core::status::{
-    Charge, DualDevice, EqPreset, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange, TouchControls,
+    BassBand, Charge, DualDevice, EqPreset, EqPresets, JSON_SCHEMA, NoiseControl, Status, Switch, TouchChange,
+    TouchControls,
 };
 use budctl_core::{Error, Found};
 use serde_json::Value;
@@ -433,21 +434,24 @@ pub fn eq(
     Ok(())
 }
 
-/// After `bass <level>`: the buds acked; they cannot report the level back.
-pub fn bass_level(
+/// After `bass <band> <level>`: the buds acked; they cannot report the level back.
+pub fn bass_band(
     out: &mut impl Write,
     device: &PairedDevice,
     model: &dyn Device,
+    band: BassBand,
     level: i8,
     as_json: bool,
 ) -> Result<(), Failure> {
     if as_json {
-        return json(out, Some((device, model)), serde_json::json!({ "bass_level": level }));
+        let body = serde_json::json!({ "bass": { "band": band, "level": level } });
+        return json(out, Some((device, model)), body);
     }
     header(out, device, model)?;
     writeln!(
         out,
-        "  Bass level  {level:+} (accepted; the buds cannot report it back)"
+        "  Bass, {} frequencies  {level:+} (accepted; the buds cannot report it back)",
+        band.name()
     )?;
     Ok(())
 }

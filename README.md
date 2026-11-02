@@ -57,7 +57,7 @@ budctl eq delete custom-4                  # delete a custom preset
 budctl game on|off                         # game mode (low latency)
 budctl set bass-boost|spatial|wind|dual on|off
 budctl dual                                # the phones and computers dual connection keeps
-budctl bass 2                              # bass level, -5 to +5
+budctl bass low 2                          # bass boost, band by band (low, medium, high): -5 to +5
 budctl touch                               # what each tap and hold does
 budctl touch left triple-tap previous      # give a gesture an action (--dry-run first, if you like)
 budctl touch cycle off anc                 # the modes a hold steps through

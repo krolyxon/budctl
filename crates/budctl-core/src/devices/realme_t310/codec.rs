@@ -5,7 +5,8 @@ use crate::bt::BdAddr;
 use crate::error::{Error, Result};
 use crate::reader::Reader;
 use crate::status::{
-    AncLevel, Battery, Charge, DualDevice, EqBand, EqPreset, Gesture, GestureChoice, NoiseControl, NoiseMode, Switch,
+    AncLevel, BassBand, Battery, Charge, DualDevice, EqBand, EqPreset, Gesture, GestureChoice, NoiseControl, NoiseMode,
+    Switch,
 };
 
 /// Spec: realme_t310.md#bitmap
@@ -46,6 +47,18 @@ pub(super) fn bass_write_payload(level: i8) -> Result<[u8; 3]> {
     let [min, max, level] = [min, max, level].map(|v| v.to_le_bytes()[0]);
     Ok([min, max, level])
 }
+/// `FB 05 <level s8> <band>`: the band-less payload, then the band byte: `01` low, `02` medium,
+/// `03` high. Buds whose bass engine has bands ignore a write without it. Spec: realme_t310.md#bass-bands
+pub(super) fn bass_band_payload(band: BassBand, level: i8) -> Result<[u8; 4]> {
+    let [min, max, level] = bass_write_payload(level)?;
+    let band = match band {
+        BassBand::Low => 0x01,
+        BassBand::Medium => 0x02,
+        BassBand::High => 0x03,
+    };
+    Ok([min, max, level, band])
+}
+
 /// Spec: realme_t310.md#gesture-write
 pub(super) const GESTURE_WRITE: u16 = 0x0401;
 
@@ -1294,6 +1307,21 @@ mod tests {
         let frame = crate::devices::realme_t310::frame::encode(BASS_LEVEL_WRITE, 0x05, &bass_write_payload(3).unwrap())
             .unwrap();
         assert_eq!(crate::debug::hex(&frame), "AA 0A 00 00 1B 04 05 03 00 FB 05 03");
+    }
+
+    #[test]
+    fn bass_band_payloads() {
+        assert_eq!(bass_band_payload(BassBand::Low, 3).unwrap(), [0xFB, 0x05, 0x03, 0x01]);
+        assert_eq!(
+            bass_band_payload(BassBand::Medium, -5).unwrap(),
+            [0xFB, 0x05, 0xFB, 0x02]
+        );
+        assert_eq!(bass_band_payload(BassBand::High, 0).unwrap(), [0xFB, 0x05, 0x00, 0x03]);
+        assert!(matches!(bass_band_payload(BassBand::Low, 6), Err(Error::Usage(_))));
+        // The frame the spec gives (realme_t310.md#bass-bands).
+        let payload = bass_band_payload(BassBand::Low, 3).unwrap();
+        let frame = crate::devices::realme_t310::frame::encode(BASS_LEVEL_WRITE, 0x05, &payload).unwrap();
+        assert_eq!(crate::debug::hex(&frame), "AA 0B 00 00 1B 04 05 04 00 FB 05 03 01");
     }
 
     /// The owner's custom EQ list (W11a): "Custom1", id 04, 6 flat bands from 50 Hz.

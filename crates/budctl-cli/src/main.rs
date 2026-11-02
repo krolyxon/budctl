@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 use budctl_core::bt::BdAddr;
-use budctl_core::status::{AncLevel, EqBand, NoiseMode};
+use budctl_core::status::{AncLevel, BassBand, EqBand, NoiseMode};
 use budctl_core::{Error, Kind};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -87,8 +87,11 @@ enum Command {
         #[arg(value_enum)]
         state: OnOff,
     },
-    /// Set the bass level, -5 to +5. The buds cannot report it back, so only their ack is checked.
+    /// Set the level of one band of bass boost (low, medium, high), -5 to +5; bass boost must be on
+    /// (`set bass-boost on`). The buds cannot report it back, so only their ack is checked.
     Bass {
+        #[arg(value_enum)]
+        band: BandArg,
         /// Checked here, before connecting; core checks it again.
         #[arg(allow_negative_numbers = true, value_parser = clap::value_parser!(i8).range(-5..=5))]
         level: i8,
@@ -183,6 +186,23 @@ impl Side {
             Side::Left => "left",
             Side::Right => "right",
             Side::Both => "both",
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum BandArg {
+    Low,
+    Medium,
+    High,
+}
+
+impl From<BandArg> for BassBand {
+    fn from(arg: BandArg) -> Self {
+        match arg {
+            BandArg::Low => BassBand::Low,
+            BandArg::Medium => BassBand::Medium,
+            BandArg::High => BassBand::High,
         }
     }
 }
@@ -353,9 +373,9 @@ fn run(cli: &Cli, out: &mut impl Write) -> Result<(), output::Failure> {
             let now = session.set_switch(switch, matches!(state, OnOff::On))?;
             output::switch(out, &device, model, &now, cli.json)
         }
-        Command::Bass { level } => {
-            session.set_bass_level(level)?;
-            output::bass_level(out, &device, model, level, cli.json)
+        Command::Bass { band, level } => {
+            session.set_bass_band(band.into(), level)?;
+            output::bass_band(out, &device, model, band.into(), level, cli.json)
         }
         Command::Find { action, .. } => {
             let ring = matches!(action, FindAction::Start);

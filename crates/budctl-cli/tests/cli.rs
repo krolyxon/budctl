@@ -82,14 +82,16 @@ fn the_hold_cycle_needs_two_or_three_known_modes() {
 }
 
 #[test]
-fn bass_needs_a_level_from_minus_5_to_5() {
-    // Out of range fails while parsing, before anything connects.
+fn bass_needs_a_band_and_a_level_from_minus_5_to_5() {
+    // A missing band, or a level out of range, fails while parsing, before anything connects.
     for args in [
         &["bass"][..],
-        &["bass", "loud"],
-        &["bass", "300"],
-        &["bass", "6"],
-        &["bass", "-6"],
+        &["bass", "3"],
+        &["bass", "loud", "3"],
+        &["bass", "low"],
+        &["bass", "low", "300"],
+        &["bass", "low", "6"],
+        &["bass", "high", "-6"],
     ] {
         let out = budctl(args);
         assert_eq!(out.status.code(), Some(1), "{args:?}");
