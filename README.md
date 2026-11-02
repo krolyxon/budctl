@@ -8,7 +8,8 @@ Noise control, EQ, game mode, touch controls, battery and more. There is a comma
 library.
 
 - No telemetry and no account. budctl talks to your buds over Bluetooth, through BlueZ on Linux.
-  The Android app does not even have the internet permission.
+  The only thing that ever goes online is the Android app's update check, and only if you switch
+  it on.
 - The settings live on the buds, so a change made on one device shows on the others.
 
 **Supported buds:** realme Buds T310. More are added as the author gets them.
@@ -157,14 +158,18 @@ Its colors come from your wallpaper (Material You), or from the desktop app's ne
 </p>
 
 The app talks to the buds only while it is on screen, and frees their control channel 10 s after
-your last change or when you leave it, so your computer can use it. It has no internet permission,
-and its build fails if anything adds one. A switch on its App page turns on the debug log, which you
-can copy from there.
+your last change or when you leave it, so your computer can use it. A switch on its App page turns
+on the debug log, which you can copy from there.
 
 To install it, download `budctl.apk` from the
 [latest release](https://github.com/krolyxon/budctl/releases/latest) on your phone and open it
-(Android asks you to allow installs from your browser or file manager). New versions come out as
-new releases: an app such as Obtainium can watch them for you, since budctl itself never checks.
+(Android asks you to allow installs from your browser or file manager). After that, the app can
+update itself: switch on **Check for updates** on its App page, and once a day, when you open it,
+it asks GitHub for budctl's latest release and offers it. **Check now** asks right away, with the
+switch off too. **Update** downloads the APK, checks its SHA-256, and hands it to Android's
+installer, which asks you first (and, the first time, to allow budctl to install apps). Nothing
+about you or your buds is sent, and with the switch off the app never goes online unless you tap
+Check now. Play Protect may offer to scan the new version; *Install without scanning* skips that.
 The APK is signed with budctl's own key. Its certificate's SHA-256 fingerprint is
 `45:6F:9B:93:AA:40:1D:57:AA:6C:75:0D:FF:13:FA:82:5A:7B:28:B6:3D:D0:40:99:80:6F:A9:7C:14:75:23:12`.
 

@@ -15,7 +15,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** The app's own settings: colors, motion, the debug log, and what budctl is. */
+/** The app's own settings: colors, motion, updates, the debug log, and what budctl is. */
 @Composable
 fun AppPage(app: App) {
     val look = LocalLook.current
@@ -35,6 +35,7 @@ fun AppPage(app: App) {
             onClick = app::toggleMotion,
         ) { Toggle(app.motion) }
     }
+    Updates(app)
     if (!app.demo) {
         Heading("debug")
         Card {
@@ -63,12 +64,53 @@ fun AppPage(app: App) {
         }
     }
     Heading("about")
-    val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?" }
     Card {
-        SettingRow(Icon.Info, "Version") { ValueChip(version) }
-        SettingRow(Icon.Phone, "No network access", "budctl has no internet permission")
+        SettingRow(
+            Icon.Phone,
+            "Network",
+            if (app.updateCheck) "GitHub, once a day, for updates" else "Only when you tap Check now",
+        )
         SettingRow(Icon.Chip, "License", "GPL-3.0-or-later")
     }
+}
+
+/**
+ * The update check (docs/android.md#updates): the daily check's switch, off until switched on, and
+ * the installed version with what is known about a newer one.
+ */
+@Composable
+private fun Updates(app: App) {
+    val context = LocalContext.current
+    val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?" }
+    Heading("updates")
+    Card {
+        SettingRow(
+            Icon.Update,
+            "Check for updates",
+            if (app.updateCheck) "Once a day, on budctl's GitHub releases" else "Off: budctl stays offline",
+            onClick = app::toggleUpdateCheck,
+        ) { Toggle(app.updateCheck) }
+        val now = app.update
+        SettingRow(Icon.Info, "Version $version", updateStatus(now, app.updateCheck)) {
+            when {
+                now is UpdateState.Available || (now is UpdateState.Failed && now.release != null) ->
+                    Pill("Update", filled = true, onClick = app::startUpdate)
+                now is UpdateState.Checking || now is UpdateState.Downloading || now is UpdateState.Installing -> {}
+                else -> Pill("Check now", onClick = app::checkForUpdate)
+            }
+        }
+    }
+}
+
+/** The update's state in words; one ending in "…" is under way, and shows in the live color. */
+fun updateStatus(state: UpdateState, on: Boolean): String? = when (state) {
+    UpdateState.Idle -> if (on) "Not checked yet" else null
+    UpdateState.Checking -> "Checking…"
+    UpdateState.UpToDate -> "Up to date"
+    is UpdateState.Available -> "${state.release.version} is out"
+    is UpdateState.Downloading -> "Downloading ${state.release.version}: ${state.percent}%…"
+    is UpdateState.Installing -> "Android is installing ${state.release.version}…"
+    is UpdateState.Failed -> state.message
 }
 
 /** The log lines the page shows; Copy log copies them all. */

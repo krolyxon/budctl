@@ -73,15 +73,29 @@ abstract class CargoNdk : Exec() {
     abstract val output: DirectoryProperty
 }
 
-/** Rule 1 (CLAUDE.md): the app never gets network access, not even from a library's manifest. */
-abstract class CheckNoInternet : DefaultTask() {
+/**
+ * Rule 1 (CLAUDE.md): the app asks for these permissions and no others, not even from a library's
+ * manifest. INTERNET and REQUEST_INSTALL_PACKAGES are the update check's alone.
+ */
+abstract class CheckPermissions : DefaultTask() {
     @get:InputFile
     abstract val manifest: RegularFileProperty
 
     @TaskAction
     fun check() {
-        if ("android.permission.INTERNET" in manifest.get().asFile.readText()) {
-            throw GradleException("The merged manifest asks for INTERNET; budctl must not (CLAUDE.md rule 1).")
+        val allowed = setOf(
+            "android.permission.BLUETOOTH_CONNECT",
+            "android.permission.INTERNET",
+            "android.permission.REQUEST_INSTALL_PACKAGES",
+            // AndroidX's own, for its receivers inside the app.
+            "io.github.krolyxon.budctl.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+        )
+        val asked = Regex("""<uses-permission[^>]*android:name="([^"]+)"""").findAll(manifest.get().asFile.readText())
+            .map { it.groupValues[1] }
+            .toSet()
+        val extra = asked - allowed
+        if (extra.isNotEmpty()) {
+            throw GradleException("The merged manifest asks for ${extra.joinToString()}; budctl must not (CLAUDE.md rule 1).")
         }
     }
 }
@@ -110,7 +124,7 @@ androidComponents {
         // The desktop app's fonts and their license (OFL 1.1), shared rather than copied.
         variant.sources.assets?.addStaticSourceDirectory(workspace.resolve("crates/budctl-gui/fonts").path)
 
-        val check = tasks.register<CheckNoInternet>("check${name}NoInternet") {
+        val check = tasks.register<CheckPermissions>("check${name}Permissions") {
             manifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
         }
         tasks.matching { it.name == "package$name" }.configureEach { dependsOn(check) }

@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Bluetooth only. There is no INTERNET permission, so the app cannot reach the network
-         (CLAUDE.md rule 1); the build fails if a library adds it. -->
+    <!-- Bluetooth for the buds. INTERNET and REQUEST_INSTALL_PACKAGES are for the update check
+         alone (CLAUDE.md rule 1, docs/android.md#updates), which stays off until the owner switches
+         it on. The build fails if a library adds any other permission. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
 
     <application

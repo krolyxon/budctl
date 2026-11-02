@@ -20,7 +20,7 @@ import kotlin.math.sin
 /** The desktop app's icons (crates/budctl-gui/src/icons.rs), as paths on a 24 × 24 grid. */
 enum class Icon {
     Equalizer, Gestures, Earbud, Settings, NoiseOff, Anc, Transparency, Game, Spatial, Bass, Wind,
-    Dual, Chevron, Bolt, Find, Info, Chip, Pencil, Trash, Laptop, Phone,
+    Dual, Chevron, Bolt, Find, Info, Chip, Pencil, Trash, Laptop, Phone, Update,
 }
 
 /** [icon], [size] across, in [color]. */
@@ -176,6 +176,12 @@ private class Pen(private val scope: DrawScope, private val color: Color) {
             Icon.Phone -> {
                 rect(7f, 2.5f, 10f, 19f, 2f)
                 line(10.5f to 18.5f, 13.5f to 18.5f)
+            }
+            // An arrow down onto a line: a download.
+            Icon.Update -> {
+                line(12f to 3.5f, 12f to 15f)
+                polyline(listOf(7f to 10.5f, 12f to 15.5f, 17f to 10.5f))
+                line(4.5f to 20f, 19.5f to 20f)
             }
         }
     }

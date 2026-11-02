@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The Android app can update itself. Switch on **Check for updates** on its App page, and once a
+  day it asks GitHub for budctl's latest release and offers it, with its notes. **Check now**
+  asks right away. **Update** downloads the APK, checks its SHA-256, and hands it to Android's
+  installer. The check is off until you switch it on, sends nothing about you or your buds, and
+  is the only thing in budctl that goes online; for it, the app now has the internet permission
+  and may ask to install apps.
+
 ## 0.1.5 (2026-11-02)
 
 Bass boost works now: the buds hear which band each level is for.

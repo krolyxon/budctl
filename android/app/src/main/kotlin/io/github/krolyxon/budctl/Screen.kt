@@ -47,6 +47,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -141,6 +142,60 @@ fun Screen(app: App, askPermission: () -> Unit) {
                 "Ring",
                 app::answerFind,
             )
+        }
+        if (app.updateDialog) UpdateDialog(app)
+    }
+}
+
+/** A newer release, found by the daily check: its notes, then how its download and install go. */
+@Composable
+private fun UpdateDialog(app: App) {
+    val look = LocalLook.current
+    val p = look.p
+    val state = app.update
+    Dialog(onDismissRequest = app::closeUpdateDialog) {
+        CompositionLocalProvider(LocalLook provides look) {
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(p.s1)
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                val buttons = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                if (state is UpdateState.Available) {
+                    Words("budctl ${state.release.version} is out", 22.sp, weight = FontWeight.SemiBold)
+                    if (state.release.notes.isNotEmpty()) {
+                        BasicText(
+                            state.release.notes,
+                            style = TextStyle(fontFamily = look.fonts.ui, fontSize = 13.5.sp, color = p.fgDim),
+                            maxLines = 14,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Row(buttons, horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+                        Pill("Later", onClick = app::laterUpdate)
+                        Pill("Update", filled = true, onClick = app::startUpdate)
+                    }
+                } else {
+                    Words("Updating budctl", 22.sp, weight = FontWeight.SemiBold)
+                    val words = updateStatus(state, on = true) ?: ""
+                    val color = when {
+                        state is UpdateState.Failed -> p.err
+                        words.endsWith('…') -> p.live
+                        else -> p.fgDim
+                    }
+                    Words(words, 13.5.sp, color)
+                    Row(buttons, horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+                        Pill("Close", onClick = app::closeUpdateDialog)
+                        if (state is UpdateState.Failed && state.release != null) {
+                            Pill("Try again", filled = true, onClick = app::startUpdate)
+                        }
+                    }
+                }
+            }
         }
     }
 }

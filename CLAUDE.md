@@ -15,13 +15,14 @@ The first supported device is the **realme Buds T310**. More devices are added a
 ## Non-goals
 
 - No firmware dumping, flashing or modification. We only speak the buds' existing control protocol.
-- No telemetry of any kind: no analytics, crash reports or usage data, and no update checks.
+- No telemetry of any kind: no analytics, crash reports or usage data, and no update checks beyond the Android app's opt-in one (rule 1).
 - No support for models the owner doesn't have. Don't speculatively add devices.
 - No Windows or macOS support.
 
 ## Hard rules
 
-1. **No telemetry or cloud.** Nothing may ever report on the user: no analytics, crash reports, usage data, update checks or accounts. Network access is fine when a feature truly needs it; none does so far.
+1. **No telemetry or cloud.** Nothing may ever report on the user: no analytics, crash reports, usage data, update checks or accounts. Network access is fine when a feature truly needs it.
+   - The one exception (owner's decision, 2026-11-02): the Android app's update check (`docs/android.md#updates`). It is off until the owner switches it on, asks only GitHub's releases API for budctl's latest release and downloads its APK, and sends nothing about the user or the buds. The CLI and the desktop app never check; package managers update them.
 2. **Clean-room protocol work.** Protocol facts (UUIDs, channel numbers, packet framing, command IDs, init sequences) may come from public references, but no other project's source code is ever translated or copied. Write findings into `docs/protocol/<device>.md` in our own words, then implement from that spec.
    - Committed files do not name or cite those references. Each fact carries an evidence level instead (rule 3).
    - Only the owner can change this rule, by editing it here.
@@ -37,7 +38,7 @@ The first supported device is the **realme Buds T310**. More devices are added a
   - `crates/budctl-cli`: package and binary `budctl`.
   - `crates/budctl-gui`: package and binary `budctl-gui`, built with iced 0.14 for Wayland only, with the CPU renderer (tiny-skia).
   - `crates/budctl-android`: `libbudctl_android.so` for the Android app, built with `cargo ndk`: three JNI exports, JSON commands and events, and a `Transport` over the app's Bluetooth link (`docs/android.md#boundary`).
-- The Android app, `android/` (Gradle, Kotlin, Compose; application id `io.github.krolyxon.budctl`, minSdk 31): `cd android && ./gradlew assembleDebug testDebugUnitTest`, with `JAVA_HOME=/opt/android-studio/jbr` on the owner's machine. Gradle runs cargo-ndk for the Rust library (arm64-v8a, plus x86_64 for the emulator in debug builds) and fails the build if the merged manifest asks for `INTERNET`. The app's Bluetooth code is `Bluetooth.kt` and `Link.kt`.
+- The Android app, `android/` (Gradle, Kotlin, Compose; application id `io.github.krolyxon.budctl`, minSdk 31): `cd android && ./gradlew assembleDebug testDebugUnitTest`, with `JAVA_HOME=/opt/android-studio/jbr` on the owner's machine. Gradle runs cargo-ndk for the Rust library (arm64-v8a, plus x86_64 for the emulator in debug builds) and fails the build if the merged manifest asks for a permission outside its allowlist: `BLUETOOTH_CONNECT`, plus `INTERNET` and `REQUEST_INSTALL_PACKAGES` for the update check alone. The app's Bluetooth code is `Bluetooth.kt` and `Link.kt`.
 - On Linux, Bluetooth goes through BlueZ:
   - Raw `AF_BLUETOOTH` sockets via `libc`: RFCOMM for the control link, L2CAP to read the buds' SDP record.
   - `zbus` (blocking API) only to list paired devices.
@@ -148,7 +149,7 @@ Exit codes:
 ## Releases
 
 - One version for the whole workspace (`Cargo.toml`), with a section per release in `CHANGELOG.md`.
-- To release: bump the version, add its `CHANGELOG.md` section, commit, then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag matches `Cargo.toml`, runs the tests, builds x86_64 and aarch64 on Ubuntu 22.04 (glibc builds; Wayland is loaded at runtime) and the signed Android APK, and publishes the tarballs, `budctl.apk`, their `.sha256` files and `install.sh`, with that changelog section as the notes.
+- To release: bump the version, add its `CHANGELOG.md` section, commit, then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag matches `Cargo.toml`, runs the tests, builds x86_64 and aarch64 on Ubuntu 22.04 (glibc builds; Wayland is loaded at runtime) and the signed Android APK, and publishes the tarballs, `budctl.apk`, their `.sha256` files and `install.sh` (the Android app's update check finds `budctl.apk` and `budctl.apk.sha256` by name), with that changelog section as the notes.
 - The APK's signing key is the owner's: `~/.local/share/budctl-release/` (never in the repo) and the repository secrets `BUDCTL_KEYSTORE_BASE64` and `BUDCTL_KEYSTORE_PASSWORD` (`docs/android.md#steps`, step 6). Every release must be signed with that same key, or phones cannot update.
 - The tarballs carry the binaries, `budctl.desktop`, the icon (`docs/icon.svg` as `budctl.svg`), `install.sh`, the README and the licenses.
 - `install.sh` installs into `~/.local` by default: from a release download (`curl … | sh`), from the unpacked tarball it sits in, or from a checkout with `--source`. It puts the icon in `share/icons/hicolor/scalable/apps/` (a release from before the icon has none, and is installed without). `--uninstall` removes the binaries, the launcher entry and the icon, never the user's config or log.

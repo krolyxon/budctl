@@ -83,8 +83,9 @@ Written from Android's API reference. No other app's code is read for it (rule 2
 
 - **Permission:** `BLUETOOTH_CONNECT`, asked for on first start. minSdk is 31 (Android 12), where
   that permission begins.
-- **No `INTERNET` permission.** Android then enforces rule 1: the app cannot open a network
-  socket. A build check fails if a library adds the permission to the merged manifest.
+- **Other permissions:** only `INTERNET` and `REQUEST_INSTALL_PACKAGES`, for the
+  [update check](#updates). A build check fails if the merged manifest asks for anything else,
+  from a library too.
 - **Paired devices:** `BluetoothAdapter.getBondedDevices()` gives the name, alias, address and
   cached service UUIDs. Whether the buds are connected comes from the A2DP and headset profile
   proxies.
@@ -190,6 +191,30 @@ Run on the phone with debug on, and paste the in-app log.
   channel once the other has let go. (On the T310 with dual connection on, both work at once:
   each host has a control link of its own.)
 
+<a id="updates"></a>
+## Updates
+
+The owner installs the APK from GitHub. So the app can fetch new releases itself: rule 1's one
+exception, the owner's decision of 2026-11-02 (`Updates.kt`).
+
+- **Off by default.** A switch on the APP page turns on a check once a day, when the app opens.
+  **Check now** checks once, with the switch on or off. Nothing else goes online.
+- **What it asks:** `GET https://api.github.com/repos/krolyxon/budctl/releases/latest`, with
+  `User-Agent: budctl` and nothing about the owner or the buds. That skips drafts and
+  pre-releases. A release is newer when its tag's version code (as `app/build.gradle.kts` makes
+  it) is above the installed one.
+- **The popup:** when the daily check finds a newer release, a dialog shows its notes (the
+  CHANGELOG.md section, reflowed for a phone) with Later and Update. Later hides that version
+  until the next one; the APP page still offers it.
+- **Update:** downloads the release's `budctl.apk` into the app's cache and checks it against
+  `budctl.apk.sha256` from the same release, deleting it on a mismatch. Android's installer
+  (`PackageInstaller`) then asks before it installs, and refuses an APK not signed with budctl's
+  key. The first time, Android asks the owner to let budctl install apps.
+- **Play Protect** may offer to send the new APK to Google for a scan. *Install without scanning*
+  under More details skips it.
+- **Failures** say why, with Try again when there is a release to retry. A failed daily check
+  stays quiet and tries again the next time the app opens.
+
 <a id="decisions"></a>
 ## Decisions
 
@@ -202,6 +227,8 @@ Run on the phone with debug on, and paste the in-app log.
   - Released as an APK on GitHub, not on the Play Store.
   - Rule 5's second exception: the JNI exports' `#[unsafe(no_mangle)]`, in
     `crates/budctl-android/src/lib.rs`, with nothing else unsafe in that crate.
+- **Taken (2026-11-02):** the opt-in [update check](#updates), rule 1's one exception, with the
+  `INTERNET` and `REQUEST_INSTALL_PACKAGES` permissions it needs.
 
 ## Not planned
 

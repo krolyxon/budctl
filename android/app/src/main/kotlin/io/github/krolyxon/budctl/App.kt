@@ -14,7 +14,7 @@ enum class Page(val word: String, val caption: String) {
     Equalizer("eq", "equalizer · presets, and the bands of yours"),
     Gestures("gestures", "gestures · taps and holds on each bud"),
     Earbuds("buds", "earbud settings · connection, find, firmware"),
-    App("app", "app · colors, motion, debug log"),
+    App("app", "app · colors, motion, updates, debug log"),
 }
 
 /** What a write is for. While one is on its way, its row says "Saving…" and takes no other. */
@@ -76,6 +76,8 @@ class App(
     private val send: (String) -> String?,
     /** Starts the worker again, as after the debug switch. */
     private val restart: () -> Unit,
+    /** The update check and download (docs/android.md#updates). */
+    private val updates: UpdateActions,
 ) {
     var buds by mutableStateOf(if (demo) Buds.DEMO else Buds.UNKNOWN)
     var connection by mutableStateOf<Connection>(if (demo) Connection.Demo else Connection.Connecting)
@@ -85,6 +87,17 @@ class App(
     var materialYou by mutableStateOf(prefs.getBoolean(MATERIAL_YOU, true))
         private set
     var motion by mutableStateOf(prefs.getBoolean(MOTION, true))
+        private set
+
+    /** The daily update check: off until the owner switches it on (CLAUDE.md rule 1). */
+    var updateCheck by mutableStateOf(prefs.getBoolean(UPDATE_CHECK, false))
+        private set
+
+    var update by mutableStateOf<UpdateState>(UpdateState.Idle)
+        private set
+
+    /** The update dialog is open: a newer release found by the daily check, then its download. */
+    var updateDialog by mutableStateOf(false)
         private set
 
     /** The noise-cancelling level to ask for: the buds' own, once they report one. */
@@ -490,11 +503,63 @@ class App(
         prefs.edit().putBoolean(MOTION, motion).apply()
     }
 
+    /** Switched on, the check runs at once, then once a day when the app opens. */
+    fun toggleUpdateCheck() {
+        updateCheck = !updateCheck
+        prefs.edit().putBoolean(UPDATE_CHECK, updateCheck).apply()
+        if (updateCheck) checkForUpdate()
+    }
+
+    /** On opening the app: the daily check, when it is on and a day has passed since the last one. */
+    fun checkForUpdateIfDue(now: Long) {
+        if (updateCheck && now - prefs.getLong(UPDATE_CHECKED_AT, 0) >= DAY_MS) updates.check(automatic = true)
+    }
+
+    /** Check now: the owner asked, so it runs whether the daily check is on or not. */
+    fun checkForUpdate() = updates.check(automatic = false)
+
+    /** Downloads and installs the release found, from the dialog or the APP page. */
+    fun startUpdate() {
+        val release = when (val now = update) {
+            is UpdateState.Available -> now.release
+            is UpdateState.Failed -> now.release
+            else -> null
+        } ?: return
+        updates.download(release)
+    }
+
+    /** "Later": the dialog stays shut for this version; the APP page still offers it. */
+    fun laterUpdate() {
+        (update as? UpdateState.Available)?.let { prefs.edit().putString(UPDATE_DISMISSED, it.release.version).apply() }
+        updateDialog = false
+    }
+
+    fun closeUpdateDialog() {
+        updateDialog = false
+    }
+
+    /** What the updater found or did. A newer release from the daily check opens the dialog, once per version. */
+    fun updateState(state: UpdateState, automatic: Boolean, now: Long) {
+        // A failed daily check stays quiet: the next one will try again.
+        if (automatic && state is UpdateState.Failed) return
+        update = state
+        if (state is UpdateState.UpToDate || state is UpdateState.Available) {
+            prefs.edit().putLong(UPDATE_CHECKED_AT, now).apply()
+        }
+        if (automatic && state is UpdateState.Available && state.release.version != prefs.getString(UPDATE_DISMISSED, null)) {
+            updateDialog = true
+        }
+    }
+
     private companion object {
         const val DUAL = "dual"
         const val DEBUG = "debug"
         const val MATERIAL_YOU = "material_you"
         const val MOTION = "motion"
+        const val UPDATE_CHECK = "update_check"
+        const val UPDATE_CHECKED_AT = "update_checked_at"
+        const val UPDATE_DISMISSED = "update_dismissed"
+        const val DAY_MS = 24 * 60 * 60 * 1000L
         const val MAX_LINES = 1_000
 
         /** The bands a demo preset starts with when there is no custom one to copy. */
