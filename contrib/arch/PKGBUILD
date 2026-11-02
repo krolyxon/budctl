@@ -4,7 +4,7 @@
 # .sha256 files (or run updpkgsums).
 
 pkgname=budctl-bin
-pkgver=0.1.3
+pkgver=0.1.4
 pkgrel=1
 pkgdesc='Control wireless earbuds from Linux without the vendor app (CLI and Wayland GUI)'
 arch=('x86_64' 'aarch64')
@@ -19,17 +19,14 @@ conflicts=('budctl')
 options=('!strip' '!debug')
 source_x86_64=("budctl-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/budctl-x86_64-unknown-linux-gnu.tar.gz")
 source_aarch64=("budctl-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/budctl-aarch64-unknown-linux-gnu.tar.gz")
-sha256sums_x86_64=('19766c16cec4206eed1b01620048e35d099d003a9bae03abd49aa5773ea1c897')
-sha256sums_aarch64=('63319c112866f8d1b9068b0e8091ea90ffca608e0783a3d18b86180b84e4d08d')
+sha256sums_x86_64=('735ab9715c55d4feedeb23d7a762987941138894a768e567f8ef331acfa0d623')
+sha256sums_aarch64=('afc1078943471b72457fb9b7a5418811e8e304693f303f0bd4221a21e6e350e9')
 
 package() {
   cd "budctl-$CARCH-unknown-linux-gnu"
   install -Dm755 budctl budctl-gui -t "$pkgdir/usr/bin/"
   install -Dm644 budctl.desktop -t "$pkgdir/usr/share/applications/"
-  # The icon ships in the releases after 0.1.3; before, the launcher entry names a stock one.
-  if [ -f budctl.svg ]; then
-    install -Dm644 budctl.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/budctl.svg"
-  fi
+  install -Dm644 budctl.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/budctl.svg"
   install -Dm644 README.md -t "$pkgdir/usr/share/doc/budctl/"
   install -Dm644 OFL-fonts.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
 }
