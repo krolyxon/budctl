@@ -71,13 +71,15 @@ jobs:
         run: |
           test -n "$KEYSTORE" || { echo "the BUDCTL_KEYSTORE_BASE64 secret is not set"; exit 1; }
           echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/budctl-release.jks"
-      - name: Build, test and check the APK
+      # The app's JVM tests run in CI (testDebugUnitTest): AGP makes unit-test tasks for the debug
+      # build only.
+      - name: Build and check the APK
         working-directory: android
         env:
           BUDCTL_KEYSTORE: ${{ runner.temp }}/budctl-release.jks
           BUDCTL_KEYSTORE_PASSWORD: ${{ secrets.BUDCTL_KEYSTORE_PASSWORD }}
         run: |
-          ./gradlew --no-daemon testReleaseUnitTest assembleRelease
+          ./gradlew --no-daemon assembleRelease
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
       - name: Package
         run: |
