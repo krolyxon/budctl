@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 (2026-11-02)
 
-- `budctl bass` sets bass boost band by band: `budctl bass low|medium|high <level>`. The buds
-  ignored the old `budctl bass <level>`: they need to know which band the level is for.
+Bass boost works now: the buds hear which band each level is for.
+
+- Bass boost on the T310 has three bands: low, medium and high frequencies. `budctl bass
+  low|medium|high <level>` sets each one, and the desktop and Android apps have a slider per band
+  under Bass boost. The buds acknowledged the old single bass level but ignored it.
 
 ## 0.1.4 (2026-11-01)
 
