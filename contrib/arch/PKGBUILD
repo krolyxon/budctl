@@ -4,7 +4,7 @@
 # .sha256 files (or run updpkgsums).
 
 pkgname=budctl-bin
-pkgver=0.1.4
+pkgver=0.1.5
 pkgrel=1
 pkgdesc='Control wireless earbuds from Linux without the vendor app (CLI and Wayland GUI)'
 arch=('x86_64' 'aarch64')
@@ -19,8 +19,8 @@ conflicts=('budctl')
 options=('!strip' '!debug')
 source_x86_64=("budctl-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/budctl-x86_64-unknown-linux-gnu.tar.gz")
 source_aarch64=("budctl-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/budctl-aarch64-unknown-linux-gnu.tar.gz")
-sha256sums_x86_64=('735ab9715c55d4feedeb23d7a762987941138894a768e567f8ef331acfa0d623')
-sha256sums_aarch64=('afc1078943471b72457fb9b7a5418811e8e304693f303f0bd4221a21e6e350e9')
+sha256sums_x86_64=('4bb5be20aa1bbc337a8bae0dfdacd4d2c8037b077b1aa7b08c09600773d5c56e')
+sha256sums_aarch64=('3df10ada1e9d7db5a65502c12b1e23e83185c193d512288617ab8c563482032f')
 
 package() {
   cd "budctl-$CARCH-unknown-linux-gnu"
